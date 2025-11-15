@@ -83,7 +83,7 @@ Installation
 
 .. code-block:: bash
 
-   git clone https://github.com/yourusername/pcfc.git
+   git clone https://github.com/shambhuphysics/PCFC-Automation.git
    cd pcfc
    source source.sh  # Load environment
 
@@ -155,7 +155,7 @@ Author
 
 University College London
 
-📧 shambhu.sharma.22@ucl.ac.uk
+📧 ucfbsbh.22@ucl.ac.uk
 
 Acknowledgments
 ===============
