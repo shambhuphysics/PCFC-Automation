@@ -1,0 +1,335 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : show_pipeline_help
+# Purpose       : Display complete coexistence + TI workflow pipeline and utility tools information
+# Child Function: --
+# Default parameters: section=all
+# Run individually: show_pipeline_help [section]
+# Last Update   : 2025-07-14
+#===============================================================================
+show_pipeline_help() {
+    local section="${1:-all}"
+    
+    case "$section" in
+        "flow"|"pipeline"|"all")
+            echo "🔬 PHASE COEXISTENCE + FREE ENERGY CORRECTION (PCFC) PIPELINE"
+            echo "====================================="
+            echo ""
+            echo "📊 COMPLETE WORKFLOW SEQUENCE:"
+            echo "  0️⃣  main_exe             → Coexistence search (binary search algorithm)"
+            echo "  1️⃣  calc_vp_scan        → Generate volume-pressure data"
+            echo "  2️⃣  fit_eos_coex        → Fit EOS & find coexistence volumes"
+            echo "  3️⃣  sample_md_coex      → MD sampling at coexistence conditions"
+            echo "  4️⃣  sample_ti_configs   → Sample configurations for TI calculations"
+            echo ""
+            echo "🔄 COMPLETE DATA FLOW:"
+            echo "  POSCAR.coex → coex_results.dat → POSCAR.s → VP.dat → vols.tmp → XDATCAR.s/l → TI directories"
+            echo ""
+            echo "🏗️  COEXISTENCE SEARCH HIERARCHY:"
+            echo "  main_exe (Main coexistence function)"
+            echo "  ├── binary_search_coexistence"
+            echo "  │   └── run_coexistence"
+            echo "  │       ├── run_md"
+            echo "  │       │   └── write_incar"
+            echo "  │       ├── calc_pressure"
+            echo "  │       ├── density_profile"
+            echo "  │       ├── check_coexistence"
+            echo "  │       └── calc_volume"
+            echo "  ├── calc_volume (for final results)"
+            echo "  └── inline AWK (for pressure extraction)"
+            echo ""
+            echo "🛠️  UTILITY TOOLS (optional):"
+            echo "  📄 convert_xdatcar      → Convert trajectories to VASP format"
+            echo "  📈 calc_msd             → Analyze diffusion properties"
+            echo "  🔧 run_md               → Execute MD simulations with cleanup"
+            echo "  📊 calc_pressure        → Extract pressure from OUTCAR files"
+            echo "  📝 write_incar          → Generate INCAR parameter files"
+            echo "  ✅ check_files          → Validate required input files"
+            echo "  🏗️  prep_structure       → Prepare and modify POSCAR files"
+            echo "  📁 setup_dirs           → Create workflow directories"
+            echo "  📋 analyze_results      → Parse and summarize outputs"
+            echo ""
+            echo "🚀 PIPELINE EXECUTION MODES:"
+            echo "  ./pipeline.sh coex      → Run coexistence search only"
+            echo "  ./pipeline.sh ti        → Run TI pipeline only (requires coex_results.dat)"
+            echo "     └── TI_MODE          → DFT | EAM | EAM-DFT |"
+
+            echo "  ./pipeline.sh both      → Run complete pipeline (default)"
+            echo ""
+            [[ "$section" == "all" ]] && echo "💡 Use: show_pipeline_help [function_name] for detailed usage"
+            ;;
+        
+        "main_exe"|"coexistence")
+            echo "0️⃣  main_exe - Coexistence Search (Binary Search Algorithm)"
+            echo "========================================================"
+            echo "Purpose: Find solid-liquid coexistence temperature using binary search"
+            echo "Usage:   main_exe (run from Coexistence/ directory)"
+            echo "Method:  Binary search algorithm with temperature tolerance"
+            echo "Inputs:  POSCAR.coex (coexistence structure)"
+            echo "Outputs: coex_results.dat (T, P, V), OUTCAR_*K files"
+            echo "Child Functions:"
+            echo "  ├── binary_search_coexistence  → Main search algorithm"
+            echo "  │   └── run_coexistence        → Individual temperature evaluation"
+            echo "  │       ├── run_md             → MD simulation execution"
+            echo "  │       ├── calc_pressure      → Pressure extraction"
+            echo "  │       ├── density_profile    → Phase analysis"
+            echo "  │       ├── check_coexistence  → Coexistence validation"
+            echo "  │       └── calc_volume        → Volume calculation"
+            echo "  └── calc_volume                → Final volume extraction"
+            echo "Next:    TI pipeline (calc_vp_scan)"
+            ;;
+            
+        "binary_search_coexistence")
+            echo "🔍 binary_search_coexistence - Temperature Search Algorithm"
+            echo "========================================================"
+            echo "Purpose: Implement binary search to find coexistence temperature"
+            echo "Algorithm: Iterative temperature refinement within tolerance"
+            echo "Parameters: TEMP_MIN, TEMP_MAX, TEMP_TOLERANCE"
+            echo "Child: run_coexistence (for each temperature evaluation)"
+            echo "Output: COEXISTENCE_TEMP (global variable)"
+            ;;
+            
+        "run_coexistence")
+            echo "🧪 run_coexistence - Single Temperature Evaluation"
+            echo "==============================================="
+            echo "Purpose: Evaluate coexistence at specific temperature"
+            echo "Steps: Thermalization → Melting → Re-thermalization → NVE sampling"
+            echo "Child Functions: run_md, calc_pressure, density_profile, check_coexistence, calc_volume"
+            echo "Output: Coexistence status (solid/liquid/coexistence)"
+            ;;
+        
+        "calc_vp_scan")
+            echo "1️⃣  calc_vp_scan - Volume-Pressure Calculation"
+            echo "=============================================="
+            echo "Purpose: Calculate pressure at different volumes for solid/liquid phases"
+            echo "Usage:   calc_vp_scan [coex_vol] [num_atoms] [num_points] [output] [temp] [melt_temp] [sim_time] [element]"
+            echo "Example: calc_vp_scan 23.5 432 5 VP.dat 980 4000 30000 Mg"
+            echo "Inputs:  POSCAR.s (crystal structure), coex_results.dat"
+            echo "Outputs: VP.dat (volume-pressure data)"
+            echo "Next:    fit_eos_coex VP.dat"
+            ;;
+            
+        "fit_eos_coex")
+            echo "2️⃣  fit_eos_coex - EOS Fitting & Coexistence"
+            echo "==========================================="
+            echo "Purpose: Fit Birch-Murnaghan EOS and find coexistence volumes"
+            echo "Usage:   fit_eos_coex [vp_file] [target_pressure] [plot] [vols_out] [element]"
+            echo "Example: fit_eos_coex VP.dat 0.58 VP_plot.png vols.tmp Mg"
+            echo "Inputs:  VP.dat (from calc_vp_scan)"
+            echo "Outputs: vols.tmp (coexistence volumes), VP_plot.png"
+            echo "Next:    sample_md_coex (reads vols.tmp automatically)"
+            ;;
+            
+        "sample_md_coex")
+            echo "3️⃣  sample_md_coex - MD Sampling at Coexistence"
+            echo "=============================================="
+            echo "Purpose: Run MD simulations at EOS-derived coexistence volumes"
+            echo "Usage:   sample_md_coex [solid_vol] [liquid_vol] [cores] [temp] [target_p] [sim_time] [element]"
+            echo "Example: sample_md_coex (auto-reads from vols.tmp)"
+            echo "Inputs:  vols.tmp (from fit_eos_coex), POSCAR.s, POSCAR.l, INCAR"
+            echo "Outputs: Sampling_*/XDATCAR.s, XDATCAR.l, CONTCAR.s, CONTCAR.l"
+            echo "Next:    sample_ti_configs"
+            ;;
+            
+        "sample_ti_configs")
+            echo "4️⃣  sample_ti_configs - Thermodynamic Integration Sampling"
+            echo "======================================================="
+            echo "Purpose: Sample MD configurations for TI energy calculations"
+            echo "Usage:   sample_ti_configs [mode] [num_atoms] [element] [cores] [start_frame] [spacing]"
+            echo "Example: sample_ti_configs EAM 432 Mg 4 10 20"
+            echo "Inputs:  XDATCAR.s/l (from sample_md_coex), POSCAR.s/l"
+            echo "Outputs: s432EAM/, l432EAM/ (or DFT directories)"
+            echo "Next:    Analyze OUTCAR.* files for thermodynamic integration"
+            ;;
+            
+        "density_profile")
+            echo "🔬 density_profile - Phase Analysis Tool"
+            echo "======================================"
+            echo "Purpose: Analyze density profiles to determine phase state"
+            echo "Usage:   Called automatically by run_coexistence"
+            echo "Function: Distinguishes solid/liquid/coexistence phases"
+            echo "Output: Phase classification for binary search"
+            ;;
+            
+        "check_coexistence")
+            echo "✅ check_coexistence - Coexistence Validation"
+            echo "==========================================="
+            echo "Purpose: Validate coexistence state from simulation results"
+            echo "Usage:   Called automatically by run_coexistence"
+            echo "Criteria: Pressure stability, phase interface, density gradients"
+            echo "Output: Boolean coexistence status"
+            ;;
+            
+        "tools"|"utilities")
+            echo "🛠️  UTILITY TOOLS REFERENCE"
+            echo "==========================="
+            echo ""
+            echo "📊 CALCULATION TOOLS:"
+            echo "  calc_pressure           → Extract pressure from OUTCAR"
+            echo "  calc_volume             → Calculate volume from OUTCAR"
+            echo "  calc_msd               → Analyze diffusion properties"
+            echo "  density_profile        → Phase state analysis"
+            echo "  check_coexistence      → Coexistence validation"
+            echo ""
+            echo "🔧 EXECUTION TOOLS:"
+            echo "  run_md                 → Execute MD simulations"
+            echo "  main_exe               → Coexistence search"
+            echo "  binary_search_coexistence → Search algorithm"
+            echo "  run_coexistence        → Temperature evaluation"
+            echo ""
+            echo "📄 FILE TOOLS:"
+            echo "  convert_xdatcar        → Convert trajectory formats"
+            echo "  write_incar            → Generate INCAR files"
+            echo "  check_files            → Validate input files"
+            echo "  prep_structure         → Prepare POSCAR files"
+            echo ""
+            echo "🏗️  MANAGEMENT TOOLS:"
+            echo "  setup_dirs             → Create workflow directories"
+            echo "  analyze_results        → Parse calculation results"
+            echo ""
+            echo "💡 Use: show_pipeline_help [tool_name] for detailed usage"
+            ;;
+            
+        "calc_volume")
+            echo "🛠️  calc_volume - Volume Calculation (CORE)"
+            echo "========================================"
+            echo "Purpose: Extract volume from OUTCAR files"
+            echo "Usage:   calc_volume [outcar_file]"
+            echo "Example: calc_volume OUTCAR_980K"
+            echo "Features: Direct volume extraction from VASP output"
+            echo "Note:    Used in both coexistence search and final results"
+            ;;
+            
+        "convert_xdatcar")
+            echo "🛠️  convert_xdatcar - XDATCAR Format Conversion (UTILITY)"
+            echo "======================================================"
+            echo "Purpose: Convert md.x XDATCAR to VASP-compatible format"
+            echo "Usage:   convert_xdatcar [remove_header] [input] [template] [output] [element] [start] [interval]"
+            echo "Example: convert_xdatcar true XDATCAR.s CONTCAR.s XDATCAR_vasp.s Mg"
+            echo "Note:    Optional tool for trajectory analysis"
+            ;;
+            
+        "calc_msd")
+            echo "🛠️  calc_msd - Mean Square Displacement Analysis (UTILITY)"
+            echo "======================================================="
+            echo "Purpose: Analyze diffusion properties from MD trajectories"
+            echo "Usage:   calc_msd [xdatcar] [species] [output] [time_step] [step_skip]"
+            echo "Example: calc_msd XDATCAR_vasp.s Mg solid_msd.png 2.0 5"
+            echo "Note:    Optional analysis tool, not required for TI workflow"
+            ;;
+            
+        "run_md")
+            echo "🛠️  run_md - MD Simulation Runner (CORE/UTILITY)"
+            echo "=============================================="
+            echo "Purpose: Execute MD simulations with automatic cleanup"
+            echo "Usage:   run_md [steps] [temp] [ensemble] [thermostat]"
+            echo "Example: run_md 30000 980 NVT thermostat"
+            echo "Features: Cleans CONTCAR velocities (crystal only), handles ensembles"
+            echo "Note:    Used in both coexistence search and TI pipeline"
+            ;;
+            
+        "calc_pressure")
+            echo "🛠️  calc_pressure - Pressure Extraction (CORE/UTILITY)"
+            echo "===================================================="
+            echo "Purpose: Extract and calculate average pressure from OUTCAR"
+            echo "Usage:   calc_pressure [outcar_file] [log_file]"
+            echo "Example: calc_pressure OUTCAR pressure.log"
+            echo "Features: Averages kinetic + potential, converts kBar → GPa"
+            echo "Note:    Used in both coexistence search and TI pipeline"
+            ;;
+            
+        "write_incar")
+            echo "🛠️  write_incar - INCAR Generator (CORE/UTILITY)"
+            echo "=============================================="
+            echo "Purpose: Generate VASP INCAR files with simulation parameters"
+            echo "Usage:   write_incar [steps] [temp] [fixed_atoms] [thermostat]"
+            echo "Example: write_incar 1500 980 '' thermostat"
+            echo "Features: Template-based, EAM/DFT parameters, thermostat config"
+            echo "Note:    Used throughout coexistence and TI workflows"
+            ;;
+            
+        "check_files")
+            echo "🛠️  check_files - File Validator (UTILITY)"
+            echo "======================================="
+            echo "Purpose: Validate required input files exist and are valid"
+            echo "Usage:   check_files [file_list]"
+            echo "Example: check_files 'POSCAR.coex POSCAR.s INCAR'"
+            echo "Features: Existence checking, format validation, size verification"
+            ;;
+            
+        "prep_structure")
+            echo "🛠️  prep_structure - Structure Preparation (UTILITY)"
+            echo "================================================"
+            echo "Purpose: Prepare and modify POSCAR files for simulations"
+            echo "Usage:   prep_structure [input] [output] [volume] [modifications]"
+            echo "Example: prep_structure POSCAR POSCAR.s -10000 clean_velocities"
+            echo "Features: Volume scaling, velocity cleaning, format standardization"
+            ;;
+            
+        "setup_dirs")
+            echo "🛠️  setup_dirs - Directory Manager (UTILITY)"
+            echo "=========================================="
+            echo "Purpose: Create and organize workflow directories"
+            echo "Usage:   setup_dirs [workflow_type] [parameters]"
+            echo "Example: setup_dirs COEX_TI '7064 432 Mg EAM'"
+            echo "Features: Standard structure, file copying, permission setting"
+            ;;
+            
+        "analyze_results")
+            echo "🛠️  analyze_results - Results Parser (UTILITY)"
+            echo "===========================================" 
+            echo "Purpose: Parse and summarize calculation results"
+            echo "Usage:   analyze_results [result_type] [input_files]"
+            echo "Example: analyze_results COEX_TI 'coex_results.dat s432EAM l432EAM'"
+            echo "Features: Energy extraction, statistical analysis, summary reporting"
+            ;;
+            
+        "quick"|"summary")
+            echo "⚡ COMPLETE PIPELINE SUMMARY"
+            echo "============================"
+            echo "main_exe → calc_vp_scan → fit_eos_coex → sample_md_coex → sample_ti_configs"
+            echo ""
+            echo "🎯 ESSENTIAL WORKFLOW:"
+            echo "  ./pipeline.sh coex              # Coexistence search (creates coex_results.dat)"
+            echo "  ./pipeline.sh ti                # TI pipeline (uses coex_results.dat)"
+            echo "  ./pipeline.sh both              # Complete pipeline (default)"
+            echo ""
+            echo "📊 MANUAL EXECUTION:"
+            echo "  main_exe                        # Coexistence search (in Coexistence/)"
+            echo "  calc_vp_scan                    # Generate VP data (in Free_energy/)"
+            echo "  fit_eos_coex                    # Find coexistence volumes"
+            echo "  sample_md_coex                  # MD at coexistence (auto-reads vols.tmp)"
+            echo "  sample_ti_configs EAM           # Sample for TI calculations"
+            echo ""
+            echo "🛠️  UTILITY TOOLS:"
+            echo "  convert_xdatcar, calc_msd, run_md, calc_pressure, calc_volume,"
+            echo "  write_incar, check_files, prep_structure, setup_dirs, analyze_results,"
+            echo "  density_profile, check_coexistence, binary_search_coexistence"
+            ;;
+            
+        *)
+            echo "❓ COMPLETE PIPELINE HELP SYSTEM"
+            echo "================================"
+            echo "Available sections:"
+            echo "  show_pipeline_help flow         # Show complete pipeline flow"
+            echo "  show_pipeline_help quick        # Complete workflow summary"
+            echo "  show_pipeline_help tools        # All utility tools"
+            echo "  show_pipeline_help [function]   # Detailed function help"
+            echo ""
+            echo "🔬 COEXISTENCE PHASE:"
+            echo "  main_exe, binary_search_coexistence, run_coexistence,"
+            echo "  density_profile, check_coexistence"
+            echo ""
+            echo "🧪 TI PHASE:"
+            echo "  calc_vp_scan, fit_eos_coex, sample_md_coex, sample_ti_configs"
+            echo ""
+            echo "🛠️  SHARED UTILITIES:"
+            echo "  run_md, calc_pressure, calc_volume, write_incar, convert_xdatcar,"
+            echo "  calc_msd, check_files, prep_structure, setup_dirs, analyze_results"
+            echo ""
+            echo "🚀 PIPELINE MODES:"
+            echo "  ./pipeline.sh coex|ti|both"
+            ;;
+    esac
+}
+

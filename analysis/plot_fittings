@@ -1,0 +1,71 @@
+#!/bin/bash -l
+#===============================================================================
+#script       : plot_fittngs
+# Description  : Plots EAM/DFT energy & pressure comparison from 'data' file
+# Usage        : plot_convergence.sh [datafile] [output_plot.png]
+#===============================================================================
+
+plot_fittings() {
+    local datafile="${1:-data}"
+    local png="${2:-eam_dft_comparison.png}"
+
+    [[ ! -f "$datafile" ]] && { echo "Data file $datafile not found."; return 1; }
+
+    echo "Processing $datafile to plot EAM/DFT comparison..."
+
+    python3 - <<EOF
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Read data skipping header
+fname = "$datafile"
+data = []
+with open(fname) as f:
+    for line in f:
+        if not line.strip() or not line.strip()[0].isdigit():
+            continue
+        data.append([float(x) for x in line.split()])
+
+data = np.array(data)
+config = data[:,0]
+eam_energy = data[:,1]
+dft_energy = data[:,2]
+energy_diff = data[:,3]
+eam_pressure = data[:,4]
+dft_pressure = data[:,5]
+pressure_diff = data[:,6]
+
+fig, axs = plt.subplots(3, 1, figsize=(8, 12), sharex=True)
+
+# Energies
+axs[0].plot(config, eam_energy, 'o-', label='EAM Energy')
+axs[0].plot(config, dft_energy, 's-', label='DFT Energy')
+axs[0].set_ylabel('Energy')
+axs[0].set_title('Energy Comparison')
+axs[0].legend()
+axs[0].grid(True)
+
+# Pressures
+axs[1].plot(config, eam_pressure, 'o-', label='EAM Pressure')
+axs[1].plot(config, dft_pressure, 's-', label='DFT Pressure')
+axs[1].set_ylabel('Pressure')
+axs[1].set_title('Pressure Comparison')
+axs[1].legend()
+axs[1].grid(True)
+
+# Differences
+axs[2].plot(config, energy_diff, 'o-', label='Energy Diff (EAM - DFT)')
+axs[2].plot(config, pressure_diff, 's-', label='Pressure Diff (EAM - DFT)')
+axs[2].set_ylabel('Difference')
+axs[2].set_xlabel('Config No')
+axs[2].set_title('EAM vs DFT Differences')
+axs[2].legend()
+axs[2].grid(True)
+
+plt.tight_layout()
+plt.savefig("$png", dpi=150)
+print(f"Plot saved as $png")
+EOF
+}
+
+

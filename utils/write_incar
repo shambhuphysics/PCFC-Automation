@@ -1,0 +1,64 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : write_incar
+# Required files: -- (generates INCAR file, optionally reads ../../Fit_ls/mdincar)
+# Purpose       : Generate VASP INCAR input file with MD simulation parameters
+# Child Function: -- (uses embedded cat for file generation)
+# Default parameters: steps=1000, temp=970, fixed_atoms=, use_thermostat=thermostat
+# Run individually: write_incar [steps] [temp] [fixed_atoms] [use_thermostat]
+# Example usage  : write_incar 30000 970 "" thermostat
+# Last Update   : 2025-07-13
+#===============================================================================
+
+write_incar() {
+    # Set default parameters (can be overridden by user input)
+    local steps="${1:-1000}"                    # Number of MD simulation steps
+    local temp="${2:-970}"                      # Simulation temperature (K)
+    local fixed_atoms="${3:-}"                  # Number of fixed atoms (empty = none)
+    local use_ander="${4:-}"                     # Thermostat control (thermostat/empty)
+    local use_nosey="${5:-}"                     # use for liquid (Nose` thermostat/empty)
+    local POMASS="${ATOMIC_MASS:-24.305}"        # Atomic mass (default: Mg = 24.305 amu)
+    
+    # Determine root directory for mdincar
+    local mdincar_path="${WORKFLOW_ROOT:-$(pwd)}/mdincar"
+    
+    # Read EAM parameters: first line of mdincar if available, otherwise use default
+    local EAM=""
+    if [[ -f "$mdincar_path" ]]; then
+        EAM=$(head -n1 "$mdincar_path")
+    else
+        #EAM="EPSILON = 0.210015; SIGREF = 3.536877; NN = 6.387934; MM = 3.141027; SIG  =  9.963680"  # bcc
+        #EAM="EPSILON = 0.062500; SIGREF = 3.335693; NN = 7.960198; MM = 5.216919; SIG  =  6.954844" <--- Tm=244K @ 0K
+         #EAM="SIG=9.963404; SIGREF=3.567764; MM=3.127240; EPSILON=0.204844; NN=6.36554" #<-- Mg older hcp -working
+        #EAM="EPSILON = 0.102932; SIGREF = 3.270076; NN = 7.512985; MM = 5.254391; SIG  =  6.878152" # <-- mdincar 
+         #EAM="EPSILON = 0.065490; SIGREF = 3.636585; NN = 6.377004; MM = 2.977558; SIG = 9.962941" #<--- bcc216**new
+         #EAM="SIGREF=3.4714; MM=4.788; EPSILON=0.0173; NN=8.137; SIG=24.939" #<-- literature Fe
+         #EAM="EPSILON = 0.052737; SIGREF = 3.010310; NN = 9.082071; MM = 5.494981; SIG  = 21.792593"  # Fe <<myfit
+        #EAM="EPSILON = 0.154061; SIGREF = 3.579188; NN = 6.508430; MM = 3.187588; SIG  =  9.964495"
+        #EAM="SIG=9.974872; SIGREF=3.123373; MM=3.467752; EPSILON=0.126737; NN=7.419717" # <-- Al
+         #EAM="EPSILON = 0.004626; SIGREF = 4.514101; NN = 7.785886; MM = 5.747295; SIG  = 12.067005" #<---432bcc-oct16-kathleen
+         #EAM="EPSILON = 0.002228; SIGREF = 4.610057; NN = 8.406301; MM = 5.818697; SIG  = 15.932020" #<---216bcc-oct16-kathleen
+       EAM="EPSILON = 0.005679; SIGREF = 4.341778; NN = 7.747924; MM = 6.782227; SIG  =  4.053943" #<----/home/ucfbsbh/Scratch/DFT/Mg/MgAl-150GPa/1.Verified_ls/liquid/Fit_ls/mdincar
+    fi
+    # Display progress information
+    echo "Setting up simulation: $steps steps at $temp K" >&2
+    
+    # Generate INCAR file with simulation parameters
+    cat > INCAR << EOF
+SYSTEM=${ELEMENT:-Mg}, coexistence
+LSHIFT=.T.; R1REF=5.5; RL=7.5
+NWRITE=0
+tipo=eam
+IBRION=0
+NBLOCK=10
+KBLOCK=100
+POTIM=1.0  #NEW
+POMASS=$POMASS 
+$EAM
+NSW=$steps
+TEBEG=$temp
+${fixed_atoms:+NFIX=$fixed_atoms}
+${use_ander:+LANDERSON=.T.; NANDERSON=300}
+${use_nosey:+SMASS=2.5}
+EOF
+}

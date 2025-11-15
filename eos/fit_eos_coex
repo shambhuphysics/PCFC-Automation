@@ -1,0 +1,204 @@
+#!/bin/bash -l
+
+#===============================================================================
+# Function : fit_eos_coex
+# Required files: VP.dat (volume-pressure data from calc_vp_scan)
+# Purpose : Fit Birch-Murnaghan equation of state (3rd or 2nd order) and find coexistence volumes
+# Child Function: -- (uses embedded Python with scipy)
+# Default parameters: order=3rd_Birch, vp_file=VP.dat, coex_pres=0.5, plot=VP_plot.png,
+# vols_out=vols.tmp, element=Mg
+# Run individually: fit_eos_coex [order] [vp_file] [coex_pres] [plot] [vols_out] [element]
+# Example usage : fit_eos_coex 3rd_Birch VP.dat 22.06 sec.png vol-sec.tmp Mg
+# : fit_eos_coex 2nd_Birch VP.dat 22.06 sec.png vol-sec.tmp Mg
+# Last Update : 2025-07-28-improved-initial-guess-high-pressure
+#===============================================================================
+
+fit_eos_coex() {
+local order="${1:-3rd_Birch}"
+local vp_file="${2:-VP.dat}"
+local coex_pres="${3:-0.5}"
+local plot="${4:-VP_plot.png}"
+local vols_out="${5:-vols-bulks.tmp}"
+local element="${6:-Mg}"
+
+echo -e "\nSTEP 2: EOS Fitting ($order)"
+echo "=================================="
+echo "Parameters: Order=$order, Coexistence pressure=${coex_pres} GPa, element=$element"
+
+[[ ! -f "$vp_file" ]] && { echo "Error: $vp_file not found!"; return 1; }
+
+if [[ "$order" != "2nd_Birch" && "$order" != "3rd_Birch" ]]; then
+    echo "Error: Order must be '2nd_Birch' or '3rd_Birch'"
+    return 1
+fi
+
+python3 << EOF
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit, brentq
+
+def birch_murnaghan_2nd_order(V, V0, B0):
+    eta = (V0 / V)**(2/3)
+    eta = np.clip(eta, 0, 10)
+    return (3/2) * B0 * (eta**(7/2) - eta**(5/2))
+
+def birch_murnaghan_3rd_order(V, V0, B0, Bp):
+    eta = (V0 / V)**(2/3)
+    eta = np.clip(eta, 0, 10)
+    return (3/2)*B0*(eta**(7/2) - eta**(5/2))*(1 + (3/4)*(Bp - 4)*(eta - 1))
+
+def calc_bulk_modulus_2nd_order(V, V0, B0):
+    eta = (V0 / V)**(2/3)
+    deta_dV = -(2/3) * eta / V
+    dPdV = (3/2) * B0 * ((7/2) * eta**(5/2) - (5/2) * eta**(3/2)) * deta_dV
+    return -V * dPdV
+
+def calc_bulk_modulus_3rd_order(V, V0, B0, Bp):
+    eta = (V0 / V)**(2/3)
+    deta_dV = -(2/3) * eta / V
+    term1 = eta**(7/2) - eta**(5/2)
+    term2 = 1 + (3/4)*(Bp - 4)*(eta - 1)
+    dterm1_dV = ((7/2) * eta**(5/2) - (5/2) * eta**(3/2)) * deta_dV
+    dterm2_dV = (3/4) * (Bp - 4) * deta_dV
+    dPdV = (3/2) * B0 * (dterm1_dV * term2 + term1 * dterm2_dV)
+    return -V * dPdV
+
+def estimate_initial_guess(V, P, target):
+    mask = ~(np.isnan(V) | np.isnan(P) | np.isinf(V) | np.isinf(P))
+    V_clean, P_clean = V[mask], P[mask]
+    if len(V_clean) < 2:
+        return V_clean.max() * 1.1, 100, 4.5
+    # Check if target pressure is within data range
+    if target < P_clean.min() or target > P_clean.max():
+        print(f"Warning: Target pressure {target} GPa is outside data range [{P_clean.min():.2f}, {P_clean.max():.2f}] for {name}")
+    # Estimate V0 near target pressure
+    sort_idx = np.argsort(P_clean)
+    V_sorted, P_sorted = V_clean[sort_idx], P_clean[sort_idx]
+    V0_est = np.interp(target, P_sorted[::-1], V_sorted[::-1]) if P_sorted[-1] < P_sorted[0] else np.interp(target, P_sorted, V_sorted)
+    # Estimate B0 from approximate slope of P-V curve
+    dPdV = np.abs((P_clean[-1] - P_clean[0]) / (V_clean[-1] - V_clean[0]))
+    B0_est = dPdV * V0_est
+    return V0_est, max(B0_est, 10), 4.5
+
+def analyze_phase(V, P, name, target, order_type):
+    mask = ~(np.isnan(V) | np.isnan(P) | np.isinf(V) | np.isinf(P))
+    V_clean, P_clean = V[mask], P[mask]
+    
+    if order_type == "2nd_Birch":
+        if len(V_clean) < 2:
+            raise ValueError(f"Insufficient data for {name}")
+        V0_est, B0_est, _ = estimate_initial_guess(V_clean, P_clean, target)
+        initial_guess = [V0_est, B0_est]
+        params, _ = curve_fit(birch_murnaghan_2nd_order, V_clean, P_clean,
+                              p0=initial_guess, bounds=([0, 0], [np.inf, np.inf]), maxfev=5000)
+        V0, B0 = params
+        f = lambda v: birch_murnaghan_2nd_order(v, V0, B0) - target
+        a, b = V0 * 0.2, V0 * 2.0
+        if f(a) * f(b) > 0:
+            print(f"Warning: No root found for {name} at {target} GPa in range [{a:.2f}, {b:.2f}]")
+            print(f"Pressure at V={a:.2f}: {birch_murnaghan_2nd_order(a, V0, B0):.2f} GPa")
+            print(f"Pressure at V={b:.2f}: {birch_murnaghan_2nd_order(b, V0, B0):.2f} GPa")
+            raise ValueError(f"Cannot find coexistence volume for {name}")
+        target_vol = brentq(f, a, b)
+        bulk = calc_bulk_modulus_2nd_order(target_vol, V0, B0)
+        print(f"{name.upper()}: V0={V0:.2f}, B0={B0:.2f}, B0'=4.00 (fixed)")
+        print(f" Volume at {target} GPa: {target_vol:.2f} Å³, Bulk: {bulk:.2f} GPa")
+        return target_vol, params, bulk, birch_murnaghan_2nd_order, calc_bulk_modulus_2nd_order
+    else:
+        if len(V_clean) < 3:
+            raise ValueError(f"Insufficient data for {name}")
+        V0_est, B0_est, Bp_est = estimate_initial_guess(V_clean, P_clean, target)
+        initial_guess = [V0_est, B0_est, Bp_est]
+        params, _ = curve_fit(birch_murnaghan_3rd_order, V_clean, P_clean,
+                              p0=initial_guess, bounds=([0, 0, 0], [np.inf, np.inf, 20]), maxfev=5000)
+        V0, B0, Bp = params
+        f = lambda v: birch_murnaghan_3rd_order(v, V0, B0, Bp) - target
+        a, b = V0 * 0.2, V0 * 2.0
+        if f(a) * f(b) > 0:
+            print(f"Warning: No root found for {name} at {target} GPa in range [{a:.2f}, {b:.2f}]")
+            print(f"Pressure at V={a:.2f}: {birch_murnaghan_3rd_order(a, V0, B0, Bp):.2f} GPa")
+            print(f"Pressure at V={b:.2f}: {birch_murnaghan_3rd_order(b, V0, B0, Bp):.2f} GPa")
+            raise ValueError(f"Cannot find coexistence volume for {name}")
+        target_vol = brentq(f, a, b)
+        bulk = calc_bulk_modulus_3rd_order(target_vol, V0, B0, Bp)
+        print(f"{name.upper()}: V0={V0:.2f}, B0={B0:.2f}, B0'={Bp:.2f}")
+        print(f" Volume at {target} GPa: {target_vol:.2f} Å³, Bulk: {bulk:.2f} GPa")
+        return target_vol, params, bulk, birch_murnaghan_3rd_order, calc_bulk_modulus_3rd_order
+
+# Load VP.dat with separate columns for solid/liquid volumes
+data = np.loadtxt('$vp_file')
+solid_vols = data[:, 0]
+liquid_vols = data[:, 1]
+solid_p = data[:, 2]
+liquid_p = data[:, 3]
+order_type = "$order"
+
+def try_analyze_phase(V, P, name, target, order_type):
+    try:
+        return analyze_phase(V, P, name, target, order_type)
+    except (ValueError, RuntimeError) as e:
+        if order_type == "3rd_Birch":
+            print(f"3rd-order fit failed for {name}: {e}. Retrying with 2nd_Birch...")
+            return analyze_phase(V, P, name, target, "2nd_Birch")
+        else:
+            raise e
+
+solid_vol, solid_params, solid_bulk, solid_eos_func, solid_bulk_func = try_analyze_phase(
+    solid_vols, solid_p, "solid", $coex_pres, order_type)
+liquid_vol, liquid_params, liquid_bulk, liquid_eos_func, liquid_bulk_func = try_analyze_phase(
+    liquid_vols, liquid_p, "liquid", $coex_pres, order_type)
+
+V_range = np.linspace(min(solid_vols.min(), liquid_vols.min()),
+                      max(solid_vols.max(), liquid_vols.max()), 300)
+P_solid_fit = solid_eos_func(V_range, *solid_params)
+P_liquid_fit = liquid_eos_func(V_range, *liquid_params)
+K_solid = np.array([solid_bulk_func(v, *solid_params) for v in V_range])
+K_liquid = np.array([liquid_bulk_func(v, *liquid_params) for v in V_range])
+
+fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 12), sharex=True)
+ax1.scatter(solid_vols, solid_p, c='red', label='Solid data', s=50, alpha=0.7)
+ax1.scatter(liquid_vols, liquid_p, c='blue', label='Liquid data', s=50, alpha=0.7)
+ax1.plot(V_range, P_solid_fit, 'r-', linewidth=2, label='Solid fit')
+ax1.plot(V_range, P_liquid_fit, 'b-', linewidth=2, label='Liquid fit')
+ax1.axhline($coex_pres, color='green', linestyle='--', label=f'Target P=$coex_pres GPa')
+ax1.set_ylabel('Pressure (GPa)')
+ax1.set_title('EOS Analysis ($order): $element at $coex_pres GPa')
+ax1.legend()
+ax1.grid(True, alpha=0.3)
+
+dPdV_solid = np.gradient(P_solid_fit, V_range)
+dPdV_liquid = np.gradient(P_liquid_fit, V_range)
+ax2.plot(V_range, dPdV_solid, 'r-', linewidth=2, label='Solid dP/dV')
+ax2.plot(V_range, dPdV_liquid, 'b-', linewidth=2, label='Liquid dP/dV')
+ax2.set_ylabel('dP/dV (GPa/Å³)')
+ax2.legend()
+ax2.grid(True, alpha=0.3)
+
+ax3.plot(V_range, K_solid, 'r-', linewidth=2, label='Solid bulk modulus')
+ax3.plot(V_range, K_liquid, 'b-', linewidth=2, label='Liquid bulk modulus')
+ax3.scatter([solid_vol], [solid_bulk], c='red', s=100, marker='o', edgecolor='black', zorder=5)
+ax3.scatter([liquid_vol], [liquid_bulk], c='blue', s=100, marker='o', edgecolor='black', zorder=5)
+ax3.annotate(f'Solid: {solid_bulk:.1f} GPa', xy=(solid_vol, solid_bulk), xytext=(10, 10),
+             textcoords='offset points', fontsize=10, ha='left')
+ax3.annotate(f'Liquid: {liquid_bulk:.1f} GPa', xy=(liquid_vol, liquid_bulk), xytext=(10, -10),
+             textcoords='offset points', fontsize=10, ha='left')
+ax3.set_xlabel('Volume (Å³)')
+ax3.set_ylabel('Bulk Modulus (GPa)')
+ax3.legend()
+ax3.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('$plot', dpi=300, bbox_inches='tight')
+plt.close()
+print(f"✓ Plot saved as $plot")
+
+with open('$vols_out', 'w') as f:
+    f.write(f"{solid_vol:.2f} {liquid_vol:.2f}\n")
+    f.write(f"{solid_bulk:.2f} {liquid_bulk:.2f}\n")
+print(f"✓ Coexistence volumes and bulk moduli saved to $vols_out")
+print(f" Solid: V={solid_vol:.2f} Å³, K={solid_bulk:.2f} GPa")
+print(f" Liquid: V={liquid_vol:.2f} Å³, K={liquid_bulk:.2f} GPa")
+EOF
+
+echo "✓ EOS fitting complete"
+}

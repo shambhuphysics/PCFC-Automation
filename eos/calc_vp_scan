@@ -1,0 +1,90 @@
+#!/bin/bash -l
+#===============================================================================
+# Function : calc_vp_scan
+# Purpose  : Generate Volume-Pressure data for solid and liquid phases
+# Output   : VP.dat (Volume_Solid Volume_Liquid Pressure_Solid Pressure_Liquid T_Solid T_Liquid)
+#===============================================================================
+
+calc_vp_scan() {
+    # Default parameters (can be overridden)
+    local coex_vol="${1:-23.5}"          # volume per atom (Å³/atom)
+    local num_atoms="${2:-432}"          # number of atoms
+    local num_points="${3:-5}"           # number of volume points
+    local output="${4:-VP.dat}"          # output file
+    local coex_temp="${5:-970}"          # coexistence temperature
+    local melt_temp="${6:-8000}"         # melting temperature
+    local sim_time="${7:-30000}"         # MD steps
+    local element="${8:-Mg}"             # element
+
+    # Short function to analyze results
+    copy_analyze() {
+        local phase=$1 index=$2
+        for file in POSCAR CONTCAR XDATCAR OSZICAR OUTCAR; do
+            [[ -f $file ]] && cp "$file" "${file}.${phase}.$index"
+        done
+        [[ -f INCAR ]] && cp INCAR "INCAR.${phase}"
+        convert_xdatcar true XDATCAR.${phase}.$index CONTCAR.${phase}.$index XDATCAR_vasp.${phase}.$index >/dev/null 2>&1
+        calc_msd XDATCAR_vasp.${phase}.$index $element msd_plot.${phase}.$index.png
+        calc_atom CONTCAR.${phase}.$index "density.${phase}.$index.dat" 40 "density.${phase}.$index.png"
+    }
+
+    # Volume ranges
+    local base_vol_s=$(echo "$coex_vol * 0.987389 * $num_atoms" | bc -l)
+    local base_vol_l=$(echo "$coex_vol * 1.012513 * $num_atoms" | bc -l)
+
+    # Separate solid and liquid volume ranges (tighter & shifted)
+    local min_vol_s=$(echo "$base_vol_s * 0.98" | bc -l)   # for aluminum, min=0.98; max =1.02
+    local max_vol_s=$(echo "$base_vol_s * 1.02" | bc -l)
+    local min_vol_l=$(echo "$base_vol_l * 0.98" | bc -l)
+    local max_vol_l=$(echo "$base_vol_l * 1.02" | bc -l)
+
+    echo -e "\nSTEP 1: Volume-Pressure Calculation ($num_points points)"
+    echo "======================================================="
+    echo "Solid volume range : $(printf "%.0f" $min_vol_s) to $(printf "%.0f" $max_vol_s) Å³"
+    echo "Liquid volume range: $(printf "%.0f" $min_vol_l) to $(printf "%.0f" $max_vol_l) Å³"
+
+    # Output header
+    echo "# Volume_Solid(Å³) Volume_Liquid(Å³) Pressure_Solid(GPa) Pressure_Liquid(GPa) Temp_Solid(K) Temp_Liquid(K)" > "$output"
+
+    # Loop over volume points
+    for i in $(seq 0 $((num_points - 1))); do
+        local vol_s=$(echo "$min_vol_s + $i * ($max_vol_s - $min_vol_s) / ($num_points - 1)" | bc -l)
+        local vol_l=$(echo "$min_vol_l + $i * ($max_vol_l - $min_vol_l) / ($num_points - 1)" | bc -l)
+        vol_s=$(printf "%.0f" $vol_s)
+        vol_l=$(printf "%.0f" $vol_l)
+
+        echo "=== Volume Point $i: Solid=$vol_s Å³ | Liquid=$vol_l Å³ ==="
+
+        #### SOLID ####
+        cp ../POSCAR.s POSCAR && sed -i "2s/.*/-$vol_s/" POSCAR
+        run_md 5000 300 '' '' use_nosey >/dev/null 2>&1
+        run_md 5000 $coex_temp '' '' use_nosey >/dev/null 2>&1
+        run_md $sim_time $coex_temp '' '' use_nosey >/dev/null 2>&1
+        copy_analyze s $i
+        local p_solid=$(calc_pressure OUTCAR.s.$i 2>&1 | grep "Pressure:" | awk '{print $2}')
+        local t_solid=$(calc_temperature OSZICAR.s.$i 2>&1 | grep "Temperature:" | awk '{print $2}')
+
+        #### LIQUID ####
+        cp ../POSCAR.s POSCAR && sed -i "2s/.*/-$vol_l/" POSCAR
+        run_md 5000 $melt_temp '' '' use_nosey >/dev/null 2>&1
+        run_md 1000 $coex_temp '' '' use_nosey >/dev/null 2>&1
+        run_md $sim_time $coex_temp '' '' use_nosey >/dev/null 2>&1
+        copy_analyze l $i
+        local p_liquid=$(calc_pressure OUTCAR.l.$i 2>&1 | grep "Pressure:" | awk '{print $2}')
+        local t_liquid=$(calc_temperature OSZICAR.l.$i 2>&1 | grep "Temperature:" | awk '{print $2}')
+
+        echo "    → Solid: $p_solid GPa, $t_solid K | Liquid: $p_liquid GPa, $t_liquid K"
+
+        # Append result to output
+        echo "$vol_s $vol_l $p_solid $p_liquid $t_solid $t_liquid" >> "$output"
+    done
+
+    # Move output files to dump/
+    mkdir -p dump
+    for file in POSCAR.* CONTCAR.* XDATCAR* OSZICAR.* OUTCAR.* INCAR.* density.*.dat md_output*; do
+        [[ -f "$file" ]] && mv "$file" dump/
+    done
+    [[ -n "$(ls XDATCAR_vasp.* 2>/dev/null)" ]] && mv XDATCAR_vasp.* dump/
+
+    echo -e "\n✓ VP calculation complete → $output"
+}

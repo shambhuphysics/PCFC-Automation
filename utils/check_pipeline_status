@@ -1,0 +1,159 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : check_pipeline_status
+# Purpose       : Check complete coexistence + TI pipeline status with directory-aware path handling
+# Child Function: --
+# Default parameters: --
+# Run individually: check_pipeline_status
+# Last Update   : 2025-07-14
+#===============================================================================
+check_pipeline_status() {
+    echo "🔍 COMPLETE PIPELINE STATUS (COEXISTENCE + TI)"
+    echo "=============================================="
+    echo ""
+    
+    # Detect current directory context and set appropriate paths
+    local main_dir="."
+    local coex_dir=""
+    local free_energy_dir=""
+    local sampling_dir=""
+    
+    # Check if we're in a specific subdirectory
+    case "$(basename "$PWD")" in
+        "Coexistence")
+            echo "📍 Location: Inside Coexistence directory"
+            main_dir=".."
+            coex_dir="."
+            ;;
+        "Free_energy")
+            echo "📍 Location: Inside Free_energy directory"
+            main_dir=".."
+            free_energy_dir="."
+            ;;
+        Sampling_*K_*GPa)
+            echo "📍 Location: Inside sampling directory ($(basename "$PWD"))"
+            main_dir="../.."
+            free_energy_dir=".."
+            sampling_dir="."
+            ;;
+        *)
+            echo "📍 Location: Main workflow directory"
+            coex_dir="Coexistence"
+            free_energy_dir="Free_energy"
+            ;;
+    esac
+    
+    # Set sampling directory path if not already set
+    if [[ -z "$sampling_dir" && -n "$free_energy_dir" ]]; then
+        sampling_dir=$(ls -d "$free_energy_dir"/Sampling_*/ 2>/dev/null | head -1)
+        [[ -n "$sampling_dir" ]] && sampling_dir="${sampling_dir%/}"
+    fi
+    
+    echo ""
+    
+    # Check Step 0: Coexistence Search
+    echo "🔬 PHASE 1: COEXISTENCE SEARCH"
+    echo "=============================="
+    
+    if [[ -f "$main_dir/coex_results.dat" ]]; then
+        source "$main_dir/coex_results.dat" 2>/dev/null
+        echo "✅ Step 0: Coexistence results available"
+        echo "   Temperature: ${COEX_TEMP:-N/A} K"
+        echo "   Pressure: ${COEX_PRESS:-N/A} GPa"
+        echo "   Volume/atom: ${COEX_VOL:-N/A} Å³/atom"
+        
+        # Check coexistence directory contents
+        if [[ -d "$main_dir/$coex_dir" ]]; then
+            local outcar_files=$(ls "$main_dir/$coex_dir"/OUTCAR_*K 2>/dev/null | wc -l)
+            if [[ $outcar_files -gt 0 ]]; then
+                echo "✅ Coexistence data: $outcar_files OUTCAR files in $coex_dir/"
+            else
+                echo "⚠️  Coexistence data: No OUTCAR files found"
+            fi
+        else
+            echo "❌ Coexistence directory missing"
+        fi
+    else
+        echo "❌ Step 0: Missing coex_results.dat - Run coexistence search first"
+        echo ""
+        echo "🎯 NEXT ACTION: Run coexistence search"
+        echo "   ./pipeline.sh coex"
+        echo "   or"
+        echo "   main_exe (in Coexistence/ directory)"
+        return 1
+    fi
+    
+    echo ""
+    echo "🧪 PHASE 2: THERMODYNAMIC INTEGRATION"
+    echo "====================================="
+    
+    # Check TI workspace
+    if [[ -d "$main_dir/$free_energy_dir" ]]; then
+        echo "✅ TI workspace: Free_energy/ directory exists"
+    else
+        echo "❌ TI workspace: Missing Free_energy/ directory"
+        echo ""
+        echo "🎯 NEXT ACTION: Run TI pipeline"
+        echo "   ./pipeline.sh ti"
+        return 1
+    fi
+    
+    # Check Step 1: VP Calculation
+    local vp_path="$main_dir/$free_energy_dir"
+    [[ "$free_energy_dir" == "." ]] && vp_path="."
+    
+    if [[ -f "$vp_path/VP.dat" ]]; then
+        local vp_points=$(grep -v "^#" "$vp_path/VP.dat" | wc -l)
+        echo "✅ Step 1: VP data available ($vp_points points)"
+    else
+        echo "❌ Step 1: Missing VP.dat - Run: calc_vp_scan"
+        echo ""
+        echo "🎯 NEXT ACTION: Run TI pipeline"
+        echo "   ./pipeline.sh ti"
+        return 1
+    fi
+    
+    # Check Step 2: EOS Fitting
+    if [[ -f "$vp_path/vols-bulks.tmp" ]]; then
+        read SOLID_V LIQUID_V < "$vp_path/vols-bulks.tmp"
+        echo "✅ Step 2: Coexistence volumes found (S:${SOLID_V}Å³, L:${LIQUID_V}Å³)"
+    else
+        echo "❌ Step 2: Missing vols-bulks.tmp - Run: fit_eos_coex"
+        return 1
+    fi
+    
+    # Check Step 3: MD Sampling
+    if [[ -n "$sampling_dir" ]]; then
+        local sampling_path="$sampling_dir"
+        [[ "$sampling_dir" == "." ]] && sampling_path="$(basename "$PWD")"
+        
+        echo "✅ Step 3: MD sampling directory found ($sampling_path)"
+        
+        # Check trajectories (adjust path based on context)
+        local traj_path="$sampling_dir"
+        [[ "$sampling_dir" == "." ]] && traj_path="."
+        
+        if [[ -f "$traj_path/XDATCAR.s" && -f "$traj_path/XDATCAR.l" ]]; then
+            echo "✅ Step 3: MD trajectories available"
+        else
+            echo "⚠️  Step 3: MD trajectories missing - Check sample_md_coex"
+        fi
+        
+        # Check Step 4: TI Directories (look in sampling directory)
+        local ti_dirs=$(ls -d "$traj_path"/*EAM/ "$traj_path"/*DFT/ 2>/dev/null | wc -l)
+        if [[ $ti_dirs -gt 0 ]]; then
+            echo "✅ Step 4: TI directories found ($ti_dirs directories)"
+            local outcar_count=$(find "$traj_path"/*EAM/ "$traj_path"/*DFT/ -name "OUTCAR.*" 2>/dev/null | wc -l)
+            echo "📊 TI Progress: $outcar_count OUTCAR files generated"
+        else
+            echo "❌ Step 4: No TI directories - Run: sample_ti_configs"
+        fi
+    else
+        echo "❌ Step 3: No sampling directory - Run: sample_md_coex"
+        return 1
+    fi
+    
+    echo ""
+    echo "🎯 PIPELINE is successful:"
+}   
+    

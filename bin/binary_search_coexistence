@@ -1,0 +1,99 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : binary_search_coexistence
+# Required files: -- (uses run_coexistence which requires POSCAR.coex)
+# Purpose       : Performs binary search to find solid-liquid coexistence temperature
+# Child Function: run_coexistence
+# Default parameters: low=TEMP_MIN (970), high=TEMP_MAX (4000), temp_tolerance=TEMP_TOLERANCE (10), max_iterations=MAX_ITERATIONS (15)
+# Run individually: binary_search_coexistence
+# Example usage  : binary_search_coexistence
+# Last Update   : 2025-07-19/crashed-->repeat-->even in long run
+#===============================================================================
+
+binary_search_coexistence() {
+    local low="${TEMP_MIN:-970}"
+    local high="${TEMP_MAX:-1000}"             
+    local temp_tolerance="${TEMP_TOLERANCE:-10}"
+    local max_iterations="${MAX_ITERATIONS:-15}"
+
+    echo "🔍 Binary search: $low-$high K (tolerance: $temp_tolerance K)"
+    echo "================================================="
+
+    local iteration=1
+    while [[ $iteration -le $max_iterations ]]; do
+        local mid=$(( (low + high) / 2 ))
+        local range=$((high - low))
+
+        echo "🔬 Iteration $iteration: Testing $mid K (range: $low-$high K)"
+
+        local state
+        state=$(run_coexistence "$mid" "false" | xargs) || { echo "❌ ERROR: Failed to evaluate $mid K"; return 1; }
+        echo "📊 Result: $state"
+
+        # Update search range
+        case "$state" in
+            "Coexistence")
+                echo -e "\033[1;32m🎯 SUCCESS:✅ Found coexistence at $mid K!\033[0m"
+                COEXISTENCE_TEMP=$mid
+                SEARCH_SUCCESS=1
+
+                echo "🔬 Performing refinement..."
+                local refined_state
+                refined_state=$(run_coexistence "$mid" "true")
+
+                echo "📈 Refined result: $refined_state"
+
+                case "$refined_state" in
+                    "Coexistence")
+                        echo -e "\033[1;32m✅ Coexistence confirmed!\033[0m"
+                        return 0
+                        ;;
+                    "Solid-only")
+                        echo "🧊 REFINED → SOLID"
+                        low=$mid
+                        ;;
+                    "Liquid-only")
+                        echo "💧 REFINED → LIQUID"
+                        high=$mid
+                        ;;
+                    "Crashed")
+                        echo "⚠️ WARNING!!: Refinement crashed at $mid K - retrying refinement 🔁"
+                        mid=$(( (low + high) / 2 )) # Re-run same iteration without updating range
+                        ;;
+                esac
+                ;;
+            "Solid-only")
+                echo "🧊 SOLID -> need HIGHER ⬆️ temperature"
+                low=$mid
+                ;;
+            "Liquid-only")
+                echo "💧 LIQUID -> need LOWER ⬇️ temperature"
+                high=$mid
+                ;;
+            "Crashed")
+                echo "⚠️ WARNING!!: Simulation crashed at $mid K - retrying 🔁"
+                mid=$(( (low + high) / 2 ))  # Re-run same iteration without updating range
+                ;;
+        esac
+
+        echo "📏 New range: $low-$high K"
+
+        # Check convergence
+        [[ $range -le $temp_tolerance ]] && {
+            echo "🎯 Converged within tolerance"
+            local final_temp=$(( (low + high) / 2 ))
+            local final_state
+            final_state=$(run_coexistence "$final_temp" "true")
+            COEXISTENCE_TEMP=$final_temp
+            [[ "$final_state" == "Coexistence" ]] && { SEARCH_SUCCESS=1; return 0; } || { SEARCH_SUCCESS=0; return 1; }
+        }
+
+        iteration=$((iteration + 1))
+        echo "-------------------------------------------------"
+    done
+
+    echo "⏰ Maximum iterations reached"
+    COEXISTENCE_TEMP=$(( (low + high) / 2 ))
+    SEARCH_SUCCESS=0
+    return 1
+}

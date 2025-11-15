@@ -1,0 +1,27 @@
+Pipeline started: Sat 15 Nov 16:02:11 GMT 2025 | Element: Mg
+[1;36m============================================================[0m
+[1;36m       SOLID-LIQUID COEXISTENCE SEARCH[0m
+[1;36m============================================================[0m
+Element: Mg | Atoms: 8788 | Range: 0-3000 K
+
+Script by: Shambhu Bhandari Sharma
+Email: shambhu.sharma.22@ucl.ac.uk
+Affiliation: University College London
+Date: 2025-11-15
+[1;36m============================================================[0m
+
+🔍 Binary search: 0-3000 K (tolerance: 10 K)
+=================================================
+🔬 Iteration 1: Testing 1500 K (range: 0-3000 K)
+=== Evaluating 1500 K ===
+Step 1: Thermalization
+Setting up simulation: 5000 steps at 1500 K
+✓ MD simulation complete: 5000 steps at 1500 K
+Step 2: Partial  melting
+Setting up simulation: 5000 steps at 12000 K
+✓ MD simulation complete: 5000 steps at 12000 K
+Step 3: Re-thermalization
+Setting up simulation: 5000 steps at 1500 K
+✓ MD simulation complete: 5000 steps at 1500 K
+Step 4: NVE sampling
+Setting up simulation: 25000 steps at 1500 K

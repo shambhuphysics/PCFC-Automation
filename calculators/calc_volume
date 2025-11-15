@@ -1,0 +1,24 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : calc_volume
+# Required files: OUTCAR (VASP output file containing volume information)
+# Purpose       : Extracts the final cell volume from OUTCAR file
+# Child Function: -- (uses grep and awk for extraction)
+# Default parameters: outcar=OUTCAR
+# Run individually: calc_volume [outcar]
+# Example usage  : calc_volume OUTCAR
+# Last Update   : 2025-07-13
+#===============================================================================
+
+calc_volume() {
+    local outcar="${1:-OUTCAR}"
+    
+    # Check if OUTCAR file exists
+    [[ ! -f "$outcar" ]] && { echo "N/A"; return 1; }
+    
+    # Extract the final cell volume from OUTCAR
+    local volume=$(grep 'volume of cell' "$outcar" | tail -1 | awk '{printf "%.2f", $5}')
+    
+    # Return volume or N/A if extraction failed
+    echo "${volume:-N/A}"
+}

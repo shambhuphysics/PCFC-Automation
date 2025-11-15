@@ -1,0 +1,43 @@
+#!/bin/bash -l
+run_block_err() {
+    source ~/usr/pcfc/calc_energy_block
+    source ~/usr/pcfc/calc_pressure_block
+    source ~/usr/pcfc/calc_temperature_block
+
+    # Generate individual plots
+    calc_energy_block OSZICAR.l eng.l.png
+    calc_energy_block OSZICAR.s eng.s.png
+    calc_pressure_block OUTCAR.l press.l.png
+    calc_pressure_block OUTCAR.s press.s.png
+    calc_temperature_block OSZICAR.l temp.l.png
+    calc_temperature_block OSZICAR.s temp.s.png
+
+    # Merge all six PNGs into a single combined plot
+    python3 - <<EOF
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+
+fig, axs = plt.subplots(3, 2, figsize=(12, 16))
+
+img_titles = [
+    ('eng.l.png', 'Energy (L)'),   ('eng.s.png', 'Energy (S)'),
+    ('press.l.png', 'Pressure (L)'), ('press.s.png', 'Pressure (S)'),
+    ('temp.l.png', 'Temperature (L)'), ('temp.s.png', 'Temperature (S)')
+]
+
+for ax, (imgfile, title) in zip(axs.flat, img_titles):
+    try:
+        img = mpimg.imread(imgfile)
+        ax.imshow(img)
+        ax.set_title(title)
+        ax.axis('off')
+    except Exception:
+        ax.set_title(title)
+        ax.text(0.5, 0.5, f"Missing\n{imgfile}", ha='center', va='center', fontsize=14)
+        ax.axis('off')
+
+plt.tight_layout()
+plt.savefig("combined_block_plots.png", dpi=400)
+print("Combined block plot saved as combined_block_plots.png")
+EOF
+}

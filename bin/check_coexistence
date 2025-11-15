@@ -1,0 +1,86 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : check_coexistence
+# Required files: density.dat (density profile data file with z-position and density columns)
+# Purpose       : Analyzes density profile to determine phase coexistence state with crash detection
+# Child Function: -- (uses awk for density profile analysis)
+# Default parameters: density_file=density.dat
+# Run individually: check_coexistence [density_file]
+# Example usage  : check_coexistence density_970K.dat
+# Last Update   : 2025-07-13
+#===============================================================================
+
+check_coexistence() {
+    local input_file="${1:-density.dat}"
+
+    awk '
+    BEGIN {
+        low_count = 0
+        max_run = 0
+        current_run = 0
+        max_low_run = 0
+        current_low_run = 0
+        total_slices = 0
+        zero_count = 0
+        non_zero_count = 0
+    }
+    {
+        total_slices++
+        
+        # Track zeros for crash detection
+        if ($2 == 0) {
+            zero_count++
+        } else {
+            non_zero_count++
+        }
+        
+        # Original logic unchanged
+        if ($2 <= 2) {
+            low_count++
+            current_low_run++
+            if (current_low_run > max_low_run) max_low_run = current_low_run
+            if (current_run > max_run) max_run = current_run
+            current_run = 0
+        } else {
+            current_run++
+            if (current_low_run > max_low_run) max_low_run = current_low_run
+            current_low_run = 0
+        }
+    }
+    END {
+        # Crash detection: if all values are zero or insufficient data
+        if (total_slices == 0 || zero_count == total_slices || total_slices < 10) {
+            print "Crashed"
+            exit
+        }
+        
+        # Additional crash check: if more than 95% are zeros
+        if (zero_count > total_slices * 0.95) {
+            print "Crashed"
+            exit
+        }
+        
+        # Original logic unchanged
+        if (current_run > max_run) max_run = current_run
+        if (current_low_run > max_low_run) max_low_run = current_low_run
+
+        liquid_threshold = total_slices * 0.25
+        solid_threshold = total_slices * 0.05
+        max_low_run_threshold = 20
+
+        if (max_low_run > max_low_run_threshold) {
+            if (max_run > liquid_threshold) {
+                print "Liquid-only"
+            } else {
+                print "Solid-only"
+            }
+        }
+        else if (low_count > solid_threshold && max_run > liquid_threshold) {
+            print "Coexistence"
+        } else if (low_count > solid_threshold) {
+            print "Solid-only"
+        } else {
+            print "Liquid-only"
+        }
+    }' "$input_file"
+}

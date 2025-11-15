@@ -1,0 +1,161 @@
+#!/bin/bash -l
+
+#===============================================================================
+# Function: calc_melting_correction
+# Purpose: Calculate melting temperature correction using thermodynamic integration
+# Required files: Any CSV with required format
+# Example usage: calc_melting_correction input.csv melting_results.txt true
+# Last Update: 2025-07-26
+#===============================================================================
+
+calc_correction() {
+  local csv_file="${1:-input.csv}"         # Input thermodynamic data file
+  local output="${2:-melting_results.txt}" # Output results file
+  local verbose="${3:-true}"               # Display detailed output
+  local py_verbose="True"
+  local s_ls_err=$(head -1 entropy_err.log)
+  [[ "$verbose" == "false" || "$verbose" == "False" || "$verbose" == "0" ]] && py_verbose="False"
+
+  echo -e "\nSTEP: Melting Temperature Correction"
+  echo "===================================="
+  echo "Parameters: input_file=${csv_file}, output=${output}, verbose=${verbose}"
+
+  [[ ! -f "$csv_file" ]] && { echo "Error: $csv_file not found!"; return 1; }
+  
+
+  python3 << EOF
+import pandas as pd
+import numpy as np
+import sys
+
+def calculate_melting_correction(csv_file="$csv_file", verbose=$py_verbose):
+  try:
+    df = pd.read_csv(csv_file)
+    first_row = df.iloc[0]
+    T = float(first_row['T_coex'])
+    P_ref = float(first_row['P_coex'])
+    N = int(first_row['Num_Atoms'])
+    S_ls = float(first_row['Entropy_melting'])
+    S_ls_err = $s_ls_err
+    k_B = 8.617333262e-5  # eV/K
+    kT = k_B * T
+
+    results = {}
+    errors = {}
+    table_data = []
+    summary_data = []  # For your new printouts
+
+    for phase in ['solid', 'liquid']:
+      phase_df = df[df['Phase'] == phase]
+      dft = phase_df[phase_df['Mode'] == 'DFT'].sort_values('Config_N')
+      eam = phase_df[phase_df['Mode'] == 'EAM'].sort_values('Config_N')
+      if len(dft) != len(eam):
+        raise ValueError(f"Mismatch in {phase} configurations: DFT={len(dft)}, EAM={len(eam)}")
+      n = len(dft)
+
+      # Energy differences
+      dU = dft['Energy'].values - eam['Energy'].values
+      mean_dU = np.mean(dU) / N
+      err_mean = np.std(dU / N, ddof=1) / np.sqrt(n)
+      table_data.append((f"Mean ΔU ({phase})", f"{mean_dU:.8f} ± {err_mean:.8f}", "", "eV/atom"))
+
+      # Fluctuation
+      fluct_i = (dU - np.mean(dU))**2 / (2 * kT * N)
+      fluct_term = np.mean(fluct_i)
+      err_fluct = np.std(fluct_i, ddof=1) / np.sqrt(n)
+      table_data.append((f"⟨(δΔU)²⟩/(2kT) ({phase})", f"{fluct_term:.8f} ± {err_fluct:.8f}", "", "eV/atom"))
+
+      # Helmholtz
+      delta_F = mean_dU - fluct_term
+      err_delta_F = np.sqrt(err_mean**2 + err_fluct**2)
+      table_data.append((f"ΔF ({phase})", f"{delta_F:.8f} ± {err_delta_F:.8f}", "", "eV/atom"))
+
+      # Pressure correction
+      V = float(dft['Volume'].iloc[0])
+      K_T = float(dft['Bulk_Modulus'].iloc[0])
+      mean_P_GPa = np.mean(dft['Pressure'].values) * 0.1
+      delta_P = mean_P_GPa - P_ref
+      gibbs_corr = -0.5 * V * delta_P**2 / K_T * 6.241509e-3
+      err_pressure = np.std(dft['Pressure'].values, ddof=1) * 0.1 / np.sqrt(n)
+      err_gibbs = V * abs(delta_P) * err_pressure / K_T * 6.241509e-3 if abs(delta_P) > 1e-10 else 0.0
+      table_data.append((f"Gibbs correction ({phase})", f"{gibbs_corr:.8f} ± {err_gibbs:.8f}", "", "eV/atom"))
+
+      delta_G = delta_F + gibbs_corr
+      err_delta_G = np.sqrt(err_delta_F**2 + err_gibbs**2)
+      results[phase] = delta_G
+      errors[phase] = err_delta_G
+      table_data.append((f"ΔG ({phase})", f"{delta_G:.8f} ± {err_delta_G:.8f}", "", "eV/atom"))
+
+      # Collect summary
+      summary_data.append((phase, delta_P, V, K_T))
+
+    # ΔG_liquid - ΔG_solid
+    delta_G_ls = results['liquid'] - results['solid']
+    delta_G_ls_err = np.sqrt(errors['solid']**2 + errors['liquid']**2)
+    table_data.append(("ΔG_ls", f"{delta_G_ls:.8f} ± {delta_G_ls_err:.8f}", "", "eV/atom"))
+
+    delta_T = delta_G_ls / S_ls
+    delta_T_err = np.sqrt((delta_G_ls_err / S_ls)**2 + ((delta_T * S_ls_err / S_ls)**2)) if abs(delta_G_ls) > 1e-10 and abs(S_ls) > 1e-10 else 0.0
+    table_data.append(("ΔS_ls", f"{S_ls:.8e} ± {S_ls_err:.8e}", "", "eV/K/atom"))
+    table_data.append(("ΔT", f"{delta_T:.2f} ± {delta_T_err:.2f}", "", "K"))
+    table_data.append(("T_ref", f"{int(T)}", "", "K"))
+    table_data.append(("T_corrected", f"{T + delta_T:.0f} ± {delta_T_err:.0f}", "", "K"))
+
+    # Print new summary table
+    if verbose:
+      print("\nPHASE PRESSURE/VOLUME SUMMARY (all in GPa / Å³ units)")
+      print("-" * 60)
+      for phase, delta_P, V, K_T in summary_data:
+        print(f"{phase.capitalize():<8}: ΔP = {delta_P:+7.3f} GPa,  V = {V:7.2f} Å³,  K_T = {K_T:6.2f} GPa")
+      print("-" * 60 + "\n")
+
+      print("THERMODYNAMIC INTEGRATION RESULTS")
+      print("="*90)
+      print(f"{'Parameter':<30} {'Solid':<20} {'Liquid':<20} {'Units':<10}")
+      print("-"*80)
+      for param, solid, liquid, unit in table_data:
+        print(f"{param:<30} {solid:<20} {liquid:<20} {unit:<10}")
+
+    # Save to file
+    with open('$output', 'w') as f:
+      f.write("# Melting Temperature Correction Results\n")
+      f.write(f"# Input file: {csv_file}\n")
+      f.write(f"# Reference: Vočadlo et al., J. Chem. Phys., Vol. 120, No. 6, 2004\n")
+      f.write(f"# T_ref: {int(T)} K, P_ref: {P_ref} GPa\n\n")
+      f.write("## Pressure-Volume Summary\n")
+      for phase, delta_P, V, K_T in summary_data:
+        f.write(f"{phase.capitalize():<8}: ΔP = {delta_P:+7.3f} GPa,  V = {V:7.2f} Å³,  K_T = {K_T:6.2f} GPa\n")
+      f.write("\n")
+
+      f.write("## Thermodynamic Integration\n")
+      for param, solid, liquid, unit in table_data:
+        f.write(f"{param:<30} {solid:<20} {liquid:<20} {unit:<10}\n")
+
+    print(f"\n✓ Results saved to $output")
+    return {
+      'delta_T': (delta_T, delta_T_err),
+      'delta_G_ls': (delta_G_ls, delta_G_ls_err),
+      'solid': (results['solid'], errors['solid']),
+      'liquid': (results['liquid'], errors['liquid'])
+    }
+
+  except Exception as e:
+    print(f"Error: {e}")
+    with open('$output', 'w') as f:
+      f.write(f"# Error: {str(e)}\n")
+      f.write("delta_T = 0.0 ± 0.0\n")
+      f.write(f"T_corrected = {int(T)} ± 0\n")
+    return None
+
+try:
+  results = calculate_melting_correction()
+  print("✓ Calculation complete" if results else "⚠ Calculation failed")
+except Exception as e:
+  print(f"Fatal error: {e}")
+  sys.exit(1)
+EOF
+
+  echo "✓ Analysis complete"
+}
+
+

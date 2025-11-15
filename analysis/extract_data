@@ -1,0 +1,83 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : extract_ti_data_obt
+# Required files: OUTCAR.* files in s*DFT/, s*EAM/, l*DFT/, l*EAM/ directories
+#                 ../vols-bulks.tmp (volume and bulk modulus data)
+#                 entropy.log (entropy of melting)
+# Purpose       : Extract energy, pressure, and entropy data from TI calculations
+#                 Output in OBT (One Big Table) format for temperature correction
+# Child Function: -- (uses grep and awk for data extraction)
+# Default parameters: num_atoms=432, start_frame=10, frame_spacing=20, coex_pressure=0.5, coex_temperature=980
+# Run individually: extract_ti_data_obt [num_atoms] [start_frame] [frame_spacing] [coex_pressure] [coex_temperature]
+# Example usage  : extract_ti_data_obt 432 10 20 0.5 980
+# Output format : Config_N,Phase,Energy,Pressure,Mode,Num_Atoms,Volume,Bulk_Modulus,Entropy_melting,T_coex,P_coex
+# Last Update   : 2025-07-17
+#===============================================================================
+extract_data_obt() {
+    local num_atoms="${1:-432}"
+    local start_frame="${2:-10}"
+    local frame_spacing="${3:-20}"
+    local coex_pressure="${4:-0.5}"
+    local coex_temperature="${5:-980}"
+    local output_file="PE_${coex_pressure}_T${coex_temperature}_OBT.csv"
+    
+    echo "📊 Extracting TI data for coexistence conditions:"
+    echo "   P_coex = ${coex_pressure} GPa"
+    echo "   T_coex = ${coex_temperature} K"
+
+    # Read volumes and bulk moduli
+    read vol_sol vol_liq < <(awk 'NR==1 {print $1, $2}' ../vols-bulks.tmp)
+    read bulk_sol bulk_liq < <(awk 'NR==2 {print $1, $2}' ../vols-bulks.tmp)
+    local vol_sol_per_atom=$(echo "scale=6; $vol_sol / $num_atoms" | bc -l)
+    local vol_liq_per_atom=$(echo "scale=6; $vol_liq / $num_atoms" | bc -l)
+    local entropy_melting=$(head -1 entropy.log)
+
+    echo "Config_N,Phase,Energy,Pressure,Mode,Num_Atoms,Volume,Bulk_Modulus,Entropy_melting,T_coex,P_coex" > "${output_file}"
+
+    local count=0
+
+    for ((i = start_frame; ; i += frame_spacing)); do
+        # Define all required paths
+        local f1="s${num_atoms}DFT/OUTCAR.${i}"
+        local f2="l${num_atoms}DFT/OUTCAR.${i}"
+        local f3="s${num_atoms}EAM/OUTCAR.${i}"
+        local f4="l${num_atoms}EAM/OUTCAR.${i}"
+
+        # Config mismatch / missing check
+        if [[ ! -f "$f1" ]]; then
+            echo "⚠️  Skipping config ${i} — missing one or more OUTCAR files"
+            break  # Primary config missing → stop the loop
+        elif [[ ! -f "$f2" || ! -f "$f3" || ! -f "$f4" ]]; then
+            echo "⚠️  Skipping config ${i} — missing one or more OUTCAR files"
+            continue
+        fi
+
+        # Extract DFT values
+        dft_e_s=$(grep "free  en" "$f1" | tail -1 | awk '{print $5}')
+        dft_p_s=$(grep "external pressure" "$f1" | tail -1 | awk '{print $4}')
+        dft_e_l=$(grep "free  en" "$f2" | tail -1 | awk '{print $5}')
+        dft_p_l=$(grep "external pressure" "$f2" | tail -1 | awk '{print $4}')
+
+        # Extract EAM values
+        eam_e_s=$(grep "TOTEN" "$f3" | tail -1 | awk '{print $5}')
+        eam_p_s=$(grep "pressure_eam" "$f3" | tail -1 | awk '{print $2}')
+        eam_e_l=$(grep "TOTEN" "$f4" | tail -1 | awk '{print $5}')
+        eam_p_l=$(grep "pressure_eam" "$f4" | tail -1 | awk '{print $2}')
+
+        # Sanity check for NaN/null
+        if [[ -z "$dft_e_s" || -z "$dft_p_s" || -z "$dft_e_l" || -z "$dft_p_l" || -z "$eam_e_s" || -z "$eam_p_s" || -z "$eam_e_l" || -z "$eam_p_l" ]]; then
+            echo "⚠️  Skipping config ${i} — extracted null/invalid values"
+            continue
+        fi
+
+        # Write to output
+        echo "${i},solid,${dft_e_s},${dft_p_s},DFT,${num_atoms},${vol_sol_per_atom},${bulk_sol},${entropy_melting},${coex_temperature},${coex_pressure}" >> "${output_file}"
+        echo "${i},liquid,${dft_e_l},${dft_p_l},DFT,${num_atoms},${vol_liq_per_atom},${bulk_liq},${entropy_melting},${coex_temperature},${coex_pressure}" >> "${output_file}"
+        echo "${i},solid,${eam_e_s},${eam_p_s},EAM,${num_atoms},${vol_sol_per_atom},${bulk_sol},${entropy_melting},${coex_temperature},${coex_pressure}" >> "${output_file}"
+        echo "${i},liquid,${eam_e_l},${eam_p_l},EAM,${num_atoms},${vol_liq_per_atom},${bulk_liq},${entropy_melting},${coex_temperature},${coex_pressure}" >> "${output_file}"
+
+        ((count++))
+    done
+
+    echo "✅ Extracted ${count} configurations → ${output_file}"
+}

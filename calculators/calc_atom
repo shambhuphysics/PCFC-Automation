@@ -1,0 +1,67 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : calc_atom
+# Required files: CONTCAR (VASP structure file with atomic coordinates)
+# Purpose       : Compute atomic density profile by binning z-coordinates with plotting
+# Child Function: -- (uses awk for binning, embedded Python for plotting)
+# Default parameters: infile=CONTCAR, outfile=density.dat, nslices=400, plotfile=density_plot.png
+# Run individually: calc_atom [infile] [outfile] [nslices] [plotfile]
+# Example usage  : calc_atom CONTCAR density_970K.dat 600 density_970K.png
+# For VASP: calc_atom CONTCAR density_970K.dat 600 density_970K.png DFT
+# Last Update   : 2025-07-20
+#===============================================================================
+calc_atom() {
+    local infile="${1:-CONTCAR}"
+    local outfile="${2:-density.dat}"
+    local nslices="${3:-400}"
+    local plotfile="${4:-density_plot.png}"
+    local mode="${5:-CLASSICAL}"
+
+    echo "Computing atomic density profile: $nslices slices from $infile in mode $mode"
+    [[ ! -f "$infile" ]] && { echo "Error: $infile not found!"; return 1; }
+
+    if [[ "$mode" == "DFT" ]]; then
+        awk -v ndim="$nslices" '
+        BEGIN { dx = 1.0/ndim; for(j=1; j<=ndim; j++) d[j] = 0 }
+        NR==7 { natoms = $1 }
+        NR>8 && NR<=8+natoms {
+            c = $3
+            for(j=1; j<=ndim; j++) {
+                x = j/ndim - dx
+                if(c >= x && c < x+dx) d[j]++
+            }
+        }
+        END { for(j=1; j<=ndim; j++) print j, d[j] }
+        ' "$infile" > "$outfile"
+    else
+        awk -v ndim="$nslices" '
+        BEGIN { dx = 1.0/ndim; for(j=1; j<=ndim; j++) d[j] = 0 }
+        NR==6 { natoms = $1 }
+        NR>7 && NR<=7+natoms {
+            c = $3
+            for(j=1; j<=ndim; j++) {
+                x = j/ndim - dx
+                if(c >= x && c < x+dx) d[j]++
+            }
+        }
+        END { for(j=1; j<=ndim; j++) print j, d[j] }
+        ' "$infile" > "$outfile"
+    fi
+
+    echo "Density data saved to $outfile"
+
+    python3 << EOF
+import numpy as np, matplotlib.pyplot as plt
+data = np.loadtxt('$outfile'); s, c = data.T
+plt.figure(figsize=(10,6)); plt.plot(s, c, 'b-', lw=2, marker='o', ms=4)
+plt.xlabel('Slice index'); plt.ylabel('Atom count'); plt.title('Atomic Density Profile')
+plt.grid(True, alpha=0.3); plt.legend(['Atom count per slice'])
+plt.text(0.02, 0.98, f'Max: {c.max():.0f}\\nMin: {c.min():.0f}\\nAvg: {c.mean():.1f}',
+         transform=plt.gca().transAxes, va='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+plt.tight_layout(); plt.savefig('$plotfile', dpi=150, bbox_inches='tight')
+print(f"Plot: $plotfile | Total atoms: {c.sum():.0f} | Avg density: {c.mean():.1f}")
+EOF
+
+    echo "✓ Atomic density analysis complete"
+}
+

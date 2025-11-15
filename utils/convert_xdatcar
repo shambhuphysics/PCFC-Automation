@@ -1,0 +1,71 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : convert_xdatcar
+# Required files: XDATCAR (MD trajectory), CONTCAR (structure template)
+# Purpose       : Convert md.x XDATCAR format to VASP-compatible trajectory format
+# Child Function: -- (uses embedded sed and awk for data processing)
+# Default parameters: remove_header=false, input=XDATCAR, template=CONTCAR, 
+#                    output=XDATCAR_vasp, element=Mg, start_step=1000, interval=1000
+# Run individually: convert_xdatcar [remove_header] [input] [template] [output] 
+#                                  [element] [start_step] [interval]
+# Example usage  : convert_xdatcar true XDATCAR.s CONTCAR.s XDATCAR_vasp.s Mg 1000 1000
+# Last Update   : 2025-07-13
+#===============================================================================
+
+convert_xdatcar() {
+    # Set default parameters (can be overridden by user input)
+    local remove_header="${1:-false}"       # Remove first 5 lines from input (true/false)
+    local input="${2:-XDATCAR}"             # Input trajectory file (md.x format)
+    local template="${3:-CONTCAR}"          # Template structure file for header
+    local output="${4:-XDATCAR_vasp}"       # Output trajectory file (VASP format)
+    local element="${5:-Mg}"                # Element symbol for VASP format
+    local start_step="${6:-1000}"           # Starting step number for configurations
+    local interval="${7:-1000}"             # Step interval between configurations
+    
+    # Validate required input files exist
+    [[ ! -f "$input" ]] && { echo "Error: $input not found!"; return 1; }
+    [[ ! -f "$template" ]] && { echo "Error: $template not found!"; return 1; }
+    
+    # Process input file: remove header if requested
+    local processed_input="$input"
+    if [[ "$remove_header" == "true" ]]; then
+        local temp_file="${input}.tmp"
+        # Remove first 5 lines (VASP header) from classical md.x trajectory
+        sed '1,5d' "$input" > "$temp_file"
+        processed_input="$temp_file"
+    fi
+
+    # Extract number of atoms from template structure file
+    local num_atoms=$(sed -n '6p' "$template" | awk '{print $1}')
+    
+    # Generate VASP-format trajectory file
+    {
+        # Write VASP header from template (lattice vectors, scaling)
+        head -5 "$template"
+        echo "   $element"
+        echo "     $num_atoms"
+        
+        # Process trajectory data: remove empty lines and add configuration markers
+        grep -v '^[[:space:]]*$' "$processed_input" | awk -v atoms="$num_atoms" -v start="$start_step" -v interval="$interval" \
+        'BEGIN {
+            config = start    # Initialize configuration counter
+            line = 0         # Initialize line counter
+        } 
+        {
+            # Add configuration marker at start of each frame
+            if (line % atoms == 0) {
+                print "Direct configuration=     " config
+                config += interval
+            }
+            print $0        # Print coordinate line
+            line++
+        }'
+    } > "$output"
+
+    # Cleanup temporary files if header was removed
+    [[ "$remove_header" == "true" ]] && rm -f "${input}.tmp"
+    
+    # Verify successful conversion (silent success, error only on failure)
+    [[ ! -f "$output" ]] && { echo "✗ Conversion failed!"; return 1; }
+}
+

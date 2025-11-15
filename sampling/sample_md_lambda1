@@ -1,0 +1,109 @@
+#!/bin/bash -l
+#===============================================================================
+# Function   : sample_md_lamda1
+# Purpose    : Run VASP MD sampling at coexistence conditions (solid/liquid)
+# Usage      : sample_md_lambda1 [coex_temp] [coex_pres] [sim_time] [element] [kpts]
+# Example    : sample_md_coex            # uses defaults / coex_results.dat if present
+#             sample_md_coex 970 0.5 30000 Mg "2 2 2"
+# Notes      : Expects POSCAR.s and POSCAR.l in the current working directory.
+#===============================================================================
+
+set -euo pipefail
+
+sample_md_lambda1() {
+    # Read coexistence data if file exists (optional)
+    if [[ -f ../../coex_results.dat ]]; then
+        # shellcheck disable=SC1091
+        source ../../coex_results.dat
+        echo "✓ Reading coexistence data from ../../coex_results.dat"
+        [[ ${COEX_TEMP:-}  ]] && echo "   COEX_TEMP=$COEX_TEMP K"
+        [[ ${COEX_PRESS:-} ]] && echo "   COEX_PRESS=$COEX_PRESS GPa"
+        [[ ${COEX_VOL:-}   ]] && echo "   COEX_VOL=$COEX_VOL Å^3"
+    fi
+
+    # Parameters (with sane defaults)
+    local coex_temp="${1:-${COEX_TEMP:-970}}"
+    local coex_pres="${2:-${COEX_PRESS:-0.5}}"   # placeholder; not used directly in INCAR
+    local sim_time="${3:-3000}"
+    local element="${4:-Mg}"
+    local kpoints_grid="${5:-${KPOINTS_GRID:-"1 1 1"}}"
+
+    echo
+    echo "AIMD: T=${coex_temp} K, P=${coex_pres} GPa, steps=${sim_time}, element=${element}, KPOINTS=${kpoints_grid}"
+
+    # Loop over phases: s = solid, l = liquid
+    for phase in s l; do
+        echo "→ Preparing phase '$phase' for ${sim_time} MD steps..."
+
+        # Ensure POSCAR source exists at the parent (we'll cd into AIMD_* below)
+        if [[ ! -f "POSCAR.${phase}" ]]; then
+            echo "✗ POSCAR.${phase} not found in current directory." >&2
+            exit 1
+        fi
+
+        # Create and enter work directory
+        workdir="AIMD_${phase}"
+        mkdir -p "${workdir}"
+        cd "${workdir}"
+
+        # POTCAR
+        if [[ -f "${HOME}/POTs/${element}/POTCAR" ]]; then
+            cp "${HOME}/POTs/${element}/POTCAR" .
+        else
+            echo "⚠️  POTCAR not found at ~/POTs/${element}/POTCAR" >&2
+        fi
+
+        # POSCAR
+        cp ../POSCAR.${phase} POSCAR
+
+        # INCAR
+        cat > INCAR <<EOF
+SYSTEM = ${element} (${phase})
+NPAR   = 4
+LCHARG = .FALSE. ;LWAVE  = .FALSE.; NWRITE = 0
+LREAL  = Auto; ALGO   = Fast
+ISYM   = 0; IBRION = 0
+NBLOCK = 5; KBLOCK = 1; NSW    = ${sim_time}
+SMASS  = 1.0
+POTIM  = 2.0
+ISIF   = 1
+TEBEG  = ${coex_temp}
+ISMEAR = -1; SIGMA  = $(awk "BEGIN{printf \"%.6f\", ${coex_temp}*8.617e-5}")
+EOF
+
+        # KPOINTS
+        cat > KPOINTS <<EOF
+K-Points
+0
+Monkhorst-Pack
+${kpoints_grid}
+0 0 0
+EOF
+
+        # SGE submission script
+        cat > sge_${phase}.sh <<EOF
+#!/bin/bash -l
+#$ -N AIMD_${phase}
+#$ -S /bin/bash
+#$ -l h_rt=23:00:00
+#$ -pe mpi 20
+#$ -cwd
+
+module unload -f compilers mpi
+module load compilers/intel/2019/update5
+module load mpi/intel/2019/update5/intel
+module load vasp/6.3.0-24Jan2022/intel-2019-update5
+
+gerun vasp_std
+EOF
+        chmod +x sge_${phase}.sh
+
+        # Submit
+        qsub "sge_${phase}.sh"
+        echo "✓ Submitted AIMD job for phase '${phase}' from $(pwd)"
+
+        # Back to parent for next phase
+        cd ..
+    done
+}
+

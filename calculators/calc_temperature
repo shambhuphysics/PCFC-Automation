@@ -1,0 +1,41 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : calc_temperature
+# Required files: OSZICAR (VASP output file containing temperature data)
+# Purpose       : Computes average temperature from OSZICAR file with file waiting logic
+# Child Function: -- (uses awk for calculation)
+# Default parameters: filename=OSZICAR, log_file=temperature.log
+# Run individually: calc_temperature [filename] [log_file]
+# Example usage  : calc_temperature OSZICAR mylog.txt
+# Last Update   : 2025-07-13
+#===============================================================================
+
+calc_temperature() {
+    local filename="${1:-OSZICAR}"      # Default input file is OSZICAR
+    local log_file="${2:-temperature.log}"  # Default log file
+
+    # Wait up to 10 seconds for the file to appear
+    local wait_count=0
+    while [[ ! -f "$filename" && $wait_count -lt 10 ]]; do
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+
+    # Exit if file not found
+    if [[ ! -f "$filename" ]]; then
+        echo "Error: File '$filename' not found." >&2
+        return 1
+    fi
+
+    # Calculate the average of the third column using awk
+    local avg
+    avg=$(awk '{sum+=$3} END {if(NR>0) printf "%.2f", sum/NR; else print "N/A"}' "$filename")
+
+    # Log and display result
+    if [[ "$avg" != "N/A" ]]; then
+        echo "Temperature: $avg K" | tee -a "$log_file"
+    else
+        echo "No data found in $filename." >&2
+    fi
+}
+

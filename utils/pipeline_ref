@@ -1,0 +1,39 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : pipeline_ref
+# Purpose       : Quick reference for complete coexistence + TI pipeline and tools
+# Child Function: --
+# Default parameters: --
+# Run individually: pipeline_ref
+# Last Update   : 2025-07-14
+#===============================================================================
+pipeline_ref() {
+    echo "🔬 COMPLETE COEXISTENCE + TI PIPELINE"
+    echo "====================================="
+    echo "0. main_exe              # Coexistence search → coex_results.dat"
+    echo "1. calc_vp_scan          # VP data"
+    echo "2. fit_eos_coex          # EOS fit → vols.tmp"
+    echo "3. sample_md_coex        # MD @ coexistence"
+    echo "4. sample_ti_configs EAM # TI sampling"
+    echo ""
+    echo "🚀 PIPELINE MODES:"
+    echo "./pipeline.sh coex       # Coexistence only"
+    echo "./pipeline.sh ti         # TI only (needs coex_results.dat)"
+    echo "./pipeline.sh both       # Complete pipeline (default)"
+    echo ""
+    echo "🛠️  UTILITY TOOLS:"
+    echo "Calc: calc_pressure, calc_volume, calc_msd, density_profile, check_coexistence"
+    echo "Exec: run_md, binary_search_coexistence, run_coexistence"
+    echo "File: convert_xdatcar, write_incar, check_files, prep_structure"
+    echo "Mgmt: setup_dirs, analyze_results"
+    echo ""
+    echo "📁 DIRECTORIES:"
+    echo "Coexistence/     # Binary search results"
+    echo "Free_energy/     # TI pipeline workspace"
+    echo "  └─ Sampling_*/ # MD sampling & TI configs"
+    echo "       └─ s*EAM/, l*EAM/, s*DFT/, l*DFT/"
+    echo ""
+    echo "Status: check_pipeline_status"
+    echo "Help:   show_pipeline_help [function]"
+}
+

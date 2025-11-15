@@ -1,0 +1,32 @@
+#===============================================================================
+# Function : calc_energy
+# Purpose  : Computes average energy from OSZICAR file with file waiting logic
+# Usage    : calc_energy [filename] [log_file]
+# Defaults : filename=OSZICAR, log_file=Energy.log
+# Update   : 2025-07-15
+#===============================================================================
+
+calc_energy() {
+    local filename="${1:-OSZICAR}"
+    local log_file="${2:-Energy.log}"
+    
+    # Wait up to 10 seconds for file to appear
+    local wait_count=0
+    while [[ ! -f "$filename" && $wait_count -lt 10 ]]; do
+        sleep 1
+        ((wait_count++))
+    done
+    
+    # Exit if file not found
+    [[ ! -f "$filename" ]] && { echo "Error: File '$filename' not found." >&2; return 1; }
+    
+    # Calculate average energy and handle result
+    local avg=$(awk 'NF>=7 {sum+=$7; n++} END {if(n>0) printf "%.6f", sum/n; else print "N/A"}' "$filename")
+    
+    if [[ "$avg" != "N/A" ]]; then
+        echo "Energy: $avg" | tee "$log_file"
+    else
+        echo "No data found in $filename." >&2
+        return 1
+    fi
+}

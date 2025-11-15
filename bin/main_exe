@@ -1,0 +1,65 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : main-exe
+# Required files: POSCAR.coex (original structure for coexistence search)
+# Purpose       : Main execution function that displays banner, runs coexistence search, and summarizes results
+# Child Function: binary_search_coexistence, calc_volume
+# Default parameters: USER_NAME, USER_EMAIL, USER_AFFILIATION (hardcoded user info)
+# Run individually: main-exe
+# Example usage  : main-exe
+# Last Update   : 2025-07-13
+#===============================================================================
+
+main_exe() {
+    # User information (edit as needed)
+    local USER_NAME="Shambhu Bhandari Sharma"
+    local USER_EMAIL="shambhu.sharma.22@ucl.ac.uk"
+    local USER_AFFILIATION="University College London"
+    local SCRIPT_DATE="$(date +"%Y-%m-%d")"
+
+    echo -e "\033[1;36m============================================================\033[0m"
+    echo -e "\033[1;36m       SOLID-LIQUID COEXISTENCE SEARCH\033[0m"
+    echo -e "\033[1;36m============================================================\033[0m"
+    echo "Element: $ELEMENT | Atoms: $TOTAL_ATOMS | Range: $TEMP_MIN-$TEMP_MAX K"
+    echo ""
+    echo "Script by: $USER_NAME"
+    echo "Email: $USER_EMAIL"
+    echo "Affiliation: $USER_AFFILIATION"
+    echo "Date: $SCRIPT_DATE"
+    echo -e "\033[1;36m============================================================\033[0m"
+    echo ""
+
+    # Setup
+    cp POSCAR.coex POSCAR
+
+    # Run search
+    if binary_search_coexistence; then
+        echo ""
+        echo -e "\033[1;32m============================================================\033[0m"
+        echo -e "\033[1;32m              SEARCH COMPLETED SUCCESSFULLY\033[0m"
+        echo -e "\033[1;32m============================================================\033[0m"
+        echo -e "\033[1;32mCoexistence temperature: $COEXISTENCE_TEMP K\033[0m"
+        
+        # Get final pressure and volume
+        final_pressure=$(grep 'plus kinetic' "OUTCAR_${COEXISTENCE_TEMP}K" 2>/dev/null | tail -1 | awk '{
+            avg = ($3 + $4 + $5) / 3; printf "%.2f", avg / 10
+        }')
+        final_volume=$(calc_volume "OUTCAR_${COEXISTENCE_TEMP}K")
+        
+        echo -e "\033[1;32mFinal Pressure: ${final_pressure:-N/A} GPa\033[0m"
+        echo -e "\033[1;32mFinal Volume: ${final_volume:-N/A} Å³\033[0m"
+        echo -e "\033[1;32m============================================================\033[0m"
+    else
+        echo ""
+        echo -e "\033[1;33m============================================================\033[0m"
+        echo -e "\033[1;33m           SEARCH COMPLETED WITH ESTIMATE\033[0m"
+        echo -e "\033[1;33m============================================================\033[0m"
+        echo -e "\033[1;33mCoexistence temperature estimate: $COEXISTENCE_TEMP K\033[0m"
+        echo "Note: Exact coexistence not found within tolerance"
+        echo -e "\033[1;33m============================================================\033[0m"
+    fi
+
+    echo ""
+    echo "Results saved with temperature labels"
+    echo "Check *_*K.log files for detailed analysis"
+}

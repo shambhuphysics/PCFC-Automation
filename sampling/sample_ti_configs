@@ -1,0 +1,148 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : sample_ti_configs
+# Required files: XDATCAR.s, XDATCAR.l (from sample_md_coex), POSCAR.s, POSCAR.l
+# Purpose       : Sample MD configurations for thermodynamic integration calculations
+# Default parameters: mode=EAM, num_atoms=432, element=Mg, 
+#                    start_frame=10, frame_spacing=20
+# Run individually: sample_ti_configs [mode] [num_atoms] [element]
+#                                    [start_frame] [frame_spacing] [COEX_TEMP] [KPOINTS]
+# Example usage  : sample_ti_configs EAM 432 Mg 10 20  
+# Example usage  : sample_ti_configs DFT 432 Mg 10 20 970 1 1 1
+# Last Update   : 2025-07-16
+#===============================================================================
+
+sample_ti_configs() {
+    # Set default parameters
+    local mode="${1:-EAM}"
+    local num_atoms="${2:-432}"
+    local element="${3:-Mg}"
+    local start_frame="${4:-10}"
+    local frame_spacing="${5:-20}"
+    local temp="${COEX_TEMP:-970}"
+    local kpoints="${KPOINTS:-1 1 1}"
+    
+    # Display progress
+    echo -e "\n🔬 STEP 4: Thermodynamic Integration ($mode)"
+    echo "============================================"
+    echo "Setup: ${num_atoms} ${element} atoms"
+    [[ "$mode" == "DFT" ]] && echo "Temperature: ${temp} K, K-points: ${kpoints}"
+    
+    # Validate mode
+    [[ "$mode" != "DFT" && "$mode" != "EAM" ]] && { echo "❌ Error: mode must be DFT or EAM"; return 1; }
+    
+    # Create directories
+    mkdir -p s${num_atoms}${mode} l${num_atoms}${mode}
+    
+    local phase_results=()
+    
+    # Process both phases
+    for phase in s l; do
+        local traj="XDATCAR.$phase"
+        [[ ! -f "$traj" ]] && { echo "⚠️  $traj missing, skipping"; continue; }
+        
+        # Clean trajectory file (remove first 5 lines)
+        sed '1,5d' "$traj" > "traj_clean.$phase"
+        
+        # Calculate frame information
+        local atoms=$((num_atoms + 1))
+        local total_lines=$(wc -l "traj_clean.$phase" | awk '{print $1}')
+        local frames=$((total_lines / atoms))
+        local configs=$(((frames - start_frame) / frame_spacing + 1))
+        
+        [[ $frames -le 0 ]] && { echo "❌ No valid frames in $traj"; continue; }
+        
+        phase_results+=("$phase:$frames:$configs")
+        
+        # Enter phase directory
+        cd "${phase}${num_atoms}${mode}"
+        
+        # Setup input files
+        if [[ "$mode" == "DFT" ]]; then
+            # DFT setup
+            cat > INCAR << EOF
+SYSTEM = ${element}, ${num_atoms} atoms 
+
+LCHARG = .FALSE.; LWAVE = .FALSE.; NWRITE = 0; NPAR = 4
+
+LREAL = A;  ISYM=0 ; ALGO=Fast;    PREC= Med
+
+ISIF=1  # Writes pressure
+
+ISMEAR = -1; SIGMA = $(awk "BEGIN{print $temp*8.617e-5}")
+EOF
+            
+            [[ -f ~/POTs/${element}/POTCAR ]] && cp ~/POTs/${element}/POTCAR . || echo "⚠️ POTCAR not found"
+            
+            cat > KPOINTS << EOF
+K-Points
+0
+Monkhorst Pack
+${kpoints}
+0 0 0
+EOF
+            
+            { head -5 "../POSCAR.$phase"; echo "  $element"; echo "  $num_atoms"; echo " Direct"; } > POSCAR.head
+            
+            # Create Slurm job
+            cat > slurm_${phase}.sh << EOF
+#!/bin/bash -l
+#$ -S /bin/bash
+#$ -N ${phase}_${temp}         # Job name (keep <15 chars)
+#$ -pe mpi 20            # Cores (20-40 for single node, max 40/core node)
+#$ -l h_rt=23:00:00      # Walltime (max 7 days for small jobs)
+#$ -cwd                  # Run in submission directory
+#$ -o $JOB_NAME.$JOB_ID.out
+#$ -e $JOB_NAME.$JOB_ID.err
+#$ -M ucfbsbh@ucl.ac.uk  # Notification email
+#$ -m bea                # Notify on (b)egin, (e)nd, (a)bort
+
+
+module unload -f compilers mpi
+module load compilers/intel/2019/update5
+module load mpi/intel/2019/update5/intel
+module load vasp/6.3.0-24Jan2022/intel-2019-update5
+
+
+start_frame=$start_frame
+frame_spacing=$frame_spacing
+frames=$frames
+atoms=$atoms
+
+for ((i=\$start_frame; i<=\$frames; i+=\$frame_spacing)); do
+    [[ -f OUTCAR.\$i ]] && continue
+    cp POSCAR.head POSCAR
+    awk -v i=\$i -v atoms=\$atoms 'NR>(1+(i-1)*atoms) && NR<=((i-1)*atoms+atoms) {print \$1,\$2,\$3}' ../traj_clean.$phase >> POSCAR
+    gerun vasp_std > out.\$i.log 2>&1
+    [[ -f OUTCAR ]] && cp OUTCAR OUTCAR.\$i
+done
+EOF
+            qsub slurm_${phase}.sh
+            echo "✓ Submitted DFT job for ${phase} phase"
+            
+        else
+            # EAM setup
+            cp ../INCAR . 2>/dev/null && sed -i 's/NSW=.*/NSW=0/' INCAR
+            head -7 "../POSCAR.$phase" > POSCAR.head
+            
+            # Direct execution
+            for ((i=start_frame; i<=frames; i+=frame_spacing)); do
+                [[ -f OUTCAR.$i ]] && continue
+                cp POSCAR.head POSCAR
+                awk -v i=$i -v atoms=$atoms 'NR>(1+(i-1)*atoms) && NR<=((i-1)*atoms+atoms) {print $1,$2,$3}' "../traj_clean.$phase" >> POSCAR
+                ~/usr/md.x > "out.$i.log" 2>&1
+                [[ -f OUTCAR ]] && cp OUTCAR "OUTCAR.$i"
+            done
+            echo "✓ Completed EAM calculations for ${phase} phase"
+        fi
+        cd ..
+    done
+    
+    # Display summary
+    echo "📊 Processing Summary:"
+    for result in "${phase_results[@]}"; do
+        IFS=':' read -r phase frames configs <<< "$result"
+        echo "   ${phase^^}: $frames frames → $configs configs (start=$start_frame, step=$frame_spacing)"
+    done
+    echo "✅ $mode integration complete"
+}

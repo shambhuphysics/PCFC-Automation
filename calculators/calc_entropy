@@ -1,0 +1,62 @@
+#!/bin/bash -l
+#===============================================================================
+# Function : calc_entropy
+# Purpose  : Computes entropy of melting and its error from VASP outputs
+# Usage    : calc_entropy <σ_sE> <σ_lE> <σ_sP> <σ_lP> <σ_T>
+#===============================================================================
+calc_entropy() {
+    # Check arguments
+    if [[ $# -ne 5 ]]; then
+        echo "Usage: calc_entropy <σ_sE> <σ_lE> <σ_sP> <σ_lP> <σ_T>"
+        return 1
+    fi
+
+    # Input errors
+    local sigma_Es="$1"
+    local sigma_El="$2"
+    local sigma_Ps="$3"
+    local sigma_Pl="$4"
+    local sigma_T="$5"
+
+    # Parse input data
+    local sE=$(calc_energy "OSZICAR.s" | awk '{print $2}')
+    local lE=$(calc_energy "OSZICAR.l" | awk '{print $2}')
+    local sP=$(calc_pressure "OUTCAR.s" 2>&1 | grep -o '[0-9]*\.[0-9]*')
+    local lP=$(calc_pressure "OUTCAR.l" 2>&1 | grep -o '[0-9]*\.[0-9]*')
+    local sV=$(calc_volume "OUTCAR.s")
+    local lV=$(calc_volume "OUTCAR.l")
+    local sT=$(calc_temperature "OSZICAR.s" | awk '{print $2}')
+    local lT=$(calc_temperature "OSZICAR.l" | awk '{print $2}')
+    local n=$(awk 'NR==6{for(i=1;i<=NF;i++) sum+=$i} END{print sum}' POSCAR)
+
+    # Calculate entropy and error using awk
+    awk -v Es="$sE" -v El="$lE" -v Ps="$sP" -v Pl="$lP" \
+        -v Vs="$sV" -v Vl="$lV" -v Ts="$sT" -v Tl="$lT" -v n="$n" \
+        -v sigma_Es="$sigma_Es" -v sigma_El="$sigma_El" \
+        -v sigma_Ps="$sigma_Ps" -v sigma_Pl="$sigma_Pl" \
+        -v sigma_T="$sigma_T" '
+    BEGIN {
+        eVperGPaA3 = 6.241509e-3
+
+        # Per atom values
+        dE = (El - Es) / n
+        dV = (Vl - Vs) / n
+        Pavg = (Pl + Ps) / 2
+        Tavg = (Tl + Ts) / 2
+        dPV = Pavg * dV * eVperGPaA3
+        S = (dE + dPV) / Tavg
+
+        # Error terms
+        sigma_dE = sqrt(sigma_Es^2 + sigma_El^2) / n
+        sigma_dPV = dV * eVperGPaA3 / 2 * sqrt(sigma_Pl^2 + sigma_Ps^2)
+        sigma_T = sigma_T / sqrt(2)  # since Tavg = (Tl + Ts)/2, same sigma
+
+        rel_err2 = (sigma_dE^2 + sigma_dPV^2) / (dE + dPV)^2 + (sigma_T^2) / (Tavg^2)
+        sigma_S = S * sqrt(rel_err2)
+
+        printf "Entropy: %.6e eV/K\n", S
+        printf "Entropy Error: ± %.2e eV/K\n", sigma_S
+        printf "%.6e\n", S > "entropy.log"
+        printf "%.2e\n", sigma_S > "entropy_err.log"
+    }'
+}

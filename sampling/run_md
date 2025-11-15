@@ -1,0 +1,47 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : run_md
+# Required files: POSCAR (crystal structure file)
+# Purpose       : Execute MD simulation with automatic INCAR generation and CONTCAR cleanup
+# Child Function: write_incar
+# Default parameters: steps=1000, temp=970, fixed_atoms=, use_thermostat=thermostat
+# Run individually: run_md [steps] [temp] [fixed_atoms] [use_thermostat]
+# Example usage  : run_md 30000 970 "" thermostat
+# Last Update   : 2025-07-27-gerun
+#===============================================================================
+
+run_md() {
+    # Set default parameters (can be overridden by user input)
+    local steps="${1:-10}"                # Number of MD simulation steps
+    local temp="${2:-970}"                  # Simulation temperature (K)
+    local fixed_atoms="${3:-}"              # Number of fixed atoms (empty = none)
+    local use_ander="${4:-}" # Thermostat control (thermostat/empty)
+    local use_nosey="${5:-}"               # use for liquid (Nose` thermostat/empty)
+    local TOTAL_ATOMS="${TOTAL_ATOMS:-7056}" # Total atoms in system (default: 432)
+    
+    # Check if required input file exists
+    [[ ! -f POSCAR ]] && { echo "ERROR: POSCAR file not found!" >&2; return 1; }
+    
+    # Generate INCAR file with specified simulation parameters
+    write_incar "$steps" "$temp" "$fixed_atoms" "$use_ander" "$use_nosey"
+    
+    # Execute MD simulation with MPI
+    srun ~/usr/md.x > md_output_${temp}.log 2>&1
+
+    # Wait for simulation to complete file writing
+    sleep 1
+    
+    # Verify that simulation completed successfully
+    [[ ! -f CONTCAR ]] && { echo "ERROR: CONTCAR not generated for $temp K" >&2; return 1; }
+    
+    # Clean CONTCAR by removing velocities and creating new POSCAR
+    # Extract only structure (first TOTAL_ATOMS + 8 lines: header + coordinates)
+    sed -n "1,$((TOTAL_ATOMS + 8))p" CONTCAR > POSCAR
+    
+    # Wait for file operations to complete
+    sleep 1
+    
+    echo "✓ MD simulation complete: $steps steps at $temp K" >&2
+    return 0
+}
+

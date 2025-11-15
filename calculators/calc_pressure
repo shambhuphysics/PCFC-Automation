@@ -1,0 +1,47 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : calc_pressure
+# Required files: OUTCAR (VASP output file from MD simulation)
+# Purpose       : Extract and calculate average pressure from VASP OUTCAR files
+# Child Function: -- (uses embedded awk for data processing)
+# Default parameters: outcar=OUTCAR, log_file=pressure.log
+# Run individually: calc_pressure [outcar] [log_file]
+# Example usage  : calc_pressure OUTCAR.s pressure_solid.log
+# Last Update   : 2025-07-13
+#===============================================================================
+
+calc_pressure() {
+    # Set default parameters (can be overridden by user input)
+    local outcar="${1:-OUTCAR}"             # Input OUTCAR file from VASP simulation
+    local log_file="${2:-pressure.log}"     # Output log file for pressure records
+    
+    # Wait for OUTCAR file to be written (useful for running simulations)
+    local wait_count=0
+    while [[ ! -f "$outcar" && $wait_count -lt 10 ]]; do
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    
+    # Check if required input file exists after waiting
+    [[ ! -f "$outcar" ]] && { echo "Warning: $outcar not found" >&2; return 1; }
+    
+    # Extract and calculate average pressure from OUTCAR
+    local pressure=$(grep 'plus kinetic' "$outcar" 2>/dev/null | awk '{
+        # Calculate average of diagonal pressure components (xx, yy, zz)
+        avg = ($3 + $4 + $5) / 3
+        sum += avg
+        count++
+    } END {
+        # Convert from kBar to GPa and calculate overall average
+        if (count > 0) 
+            printf "%.2f", (sum / count) / 10
+        else 
+            printf "N/A"
+    }')
+    
+    # Display and log results if pressure calculation successful
+    if [[ -n "$pressure" && "$pressure" != "N/A" ]]; then
+        echo "Pressure: ${pressure} GPa" | tee -a "$log_file" >&2
+    fi
+}
+

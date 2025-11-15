@@ -1,0 +1,21 @@
+#!/bin/bash
+phase_rename() {
+    if [ $# -ne 3 ]; then
+        echo "Usage: phase_rename <number_of_files> <old_phase> <new_phase>"
+        return 1
+    fi
+
+    local count=$1
+    local old_phase=$2
+    local new_phase=$3
+
+    for i in $(seq 1 "$count"); do
+        for f in density_*.$i.dat_${old_phase}-only_*.dat; do
+            [ -e "$f" ] || continue
+            local newname="${f/${old_phase}-only/${new_phase}}"
+            echo "Renaming $f → $newname"
+            mv "$f" "$newname"
+        done
+    done
+}
+

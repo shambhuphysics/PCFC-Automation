@@ -1,0 +1,68 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : calc_msd
+# Required files: XDATCAR_vasp (VASP-format trajectory from convert_xdatcar)
+# Purpose       : Analyze mean square displacement and diffusion properties from MD trajectories
+# Child Function: -- (uses embedded Python with kinisi library)
+# Default parameters: xdatcar=XDATCAR, species=Mg, output=msd_plot.png, 
+#                    time_step=2.0, step_skip=5
+# Run individually: calc_msd [xdatcar] [species] [output] [time_step] [step_skip]
+# Example usage  : calc_msd XDATCAR_vasp.s Mg solid_msd.png 2.0 5
+# Last Update   : 2025-07-13
+#===============================================================================
+
+calc_msd() {
+    # Set default parameters (can be overridden by user input)
+    local xdatcar="${1:-XDATCAR}"           # Input trajectory file (VASP format)
+    local species="${2:-Mg}"                # Element species for analysis
+    local output="${3:-msd_plot.png}"       # Output plot filename
+    local time_step="${4:-2.0}"             # MD time step in femtoseconds
+    local step_skip="${5:-5}"               # Skip every N frames for analysis
+    
+    # Check if required input file exists
+    [[ ! -f "$xdatcar" ]] && { echo "Error: $xdatcar not found!"; return 1; }
+    
+    # Execute Python script for MSD analysis (suppress warnings for clean output)
+    python3 << EOF 2>/dev/null
+import warnings
+warnings.filterwarnings('ignore')
+
+import numpy as np
+import matplotlib.pyplot as plt
+from kinisi.analyze import DiffusionAnalyzer
+
+# Set random seed for reproducible results
+np.random.seed(1)
+
+# Load trajectory and perform MSD analysis
+msd = DiffusionAnalyzer.from_file('$xdatcar', 
+    parser_params={
+        'specie': ['$species'],          # Element to analyze
+        'time_step': $time_step,         # Time step in femtoseconds
+        'step_skip': $step_skip,         # Frame sampling interval
+        'progress': False                # Suppress progress bars
+    },
+    uncertainty_params={'progress': False})
+
+# Convert time from ps to fs for better readability in short simulations
+time_fs = msd.dt * 1000  # Convert picoseconds to femtoseconds
+
+# Create MSD plot with error bars and corrected time units
+plt.errorbar(time_fs, msd.msd, msd.msd_std)
+plt.ylabel('MSD (Å²)')
+plt.xlabel('Δt (fs)')
+plt.title('Mean Square Displacement Analysis - $species')
+plt.grid(True, alpha=0.3)
+
+# Save plot with high quality
+plt.savefig('$output', dpi=300, bbox_inches='tight')
+plt.close()
+
+# Display results with corrected time units
+print(f"✓ MSD: {msd.msd[-1]:.1f}±{msd.msd_std[-1]:.1f} Å² at {time_fs[-1]:.0f} fs → $output")
+EOF
+    
+    # Verify successful completion
+    [[ -f "$output" ]] || { echo "✗ MSD Failed!"; return 1; }
+}
+

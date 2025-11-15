@@ -1,0 +1,124 @@
+#!/bin/bash -l
+#===============================================================================
+# Script       : plot_convergence.sh
+# Description  : Plots ΔG (solid/liquid) and ΔT with errors using matplotlib
+# Usage        : plot_convergence TI_results.csv [output_plot.png]
+#===============================================================================
+
+plot_convergence() {
+    local csv="${1:-TI_results.csv}"
+    local png="${2:-deltaG_deltaT_convergence.png}"
+
+    [[ ! -f "$csv" ]] && { echo "CSV file $csv not found."; return 1; }
+
+    echo "Processing $csv to plot ΔG/ΔT convergence..."
+
+    python3 - <<EOF
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+sns.set(style="whitegrid", font_scale=1.2)
+df = pd.read_csv("$csv")
+
+T = df['T_coex'].iloc[0]
+N = int(df['Num_Atoms'].iloc[0])
+P_ref = df['P_coex'].iloc[0]
+S_ls = df['Entropy_melting'].iloc[0]
+
+try:
+    with open("entropy_err.log") as f:
+        S_ls_err = float(f.readline().strip())
+except:
+    S_ls_err = 0.0
+
+kB = 8.617333262e-5
+kT = kB * T
+
+fig, axes = plt.subplots(3, 1, figsize=(8, 10), sharex=True)
+colors = {"solid": "tab:blue", "liquid": "tab:orange"}
+
+results = {}
+
+for i, phase in enumerate(['solid', 'liquid']):
+    phase_df = df[(df['Phase'] == phase) & (df['Mode'] == 'DFT')].sort_values('Config_N')
+    eam_df = df[(df['Phase'] == phase) & (df['Mode'] == 'EAM')].sort_values('Config_N')
+    min_len = min(len(phase_df), len(eam_df))
+    if min_len < 6:
+        continue
+
+    phase_df = phase_df.iloc[:min_len]
+    eam_df = eam_df.iloc[:min_len]
+    delta_U = phase_df['Energy'].values - eam_df['Energy'].values
+    P = phase_df['Pressure'].values * 0.1  # kBar to GPa
+    V = np.mean(phase_df['Volume'].values)
+    K_T = float(phase_df['Bulk_Modulus'].iloc[0])
+    config_N = phase_df['Config_N'].values[:min_len]
+
+    dg_vals, dg_errs = [], []
+
+    for n in range(5, min_len + 1):
+        dU = delta_U[:n]
+        pressures = P[:n]
+        mean_dU = np.mean(dU) / N
+        err_dU = np.std(dU / N, ddof=1) / np.sqrt(n)
+
+        fluct = (dU - np.mean(dU))**2 / (2 * kT * N)
+        mean_fluct = np.mean(fluct)
+        err_fluct = np.std(fluct, ddof=1) / np.sqrt(n)
+
+        delta_F = mean_dU - mean_fluct
+        err_F = np.sqrt(err_dU**2 + err_fluct**2)
+
+        delta_P = np.mean(pressures) - P_ref
+        gibbs = -0.5 * V * delta_P**2 / K_T * 6.241509e-3
+        err_P = np.std(pressures, ddof=1) / np.sqrt(n)
+        err_gibbs = V * abs(delta_P) * err_P / K_T * 6.241509e-3 if abs(delta_P) > 1e-10 else 0
+
+        dg = delta_F + gibbs
+        dg_err = np.sqrt(err_F**2 + err_gibbs**2)
+
+        dg_vals.append(dg)
+        dg_errs.append(dg_err)
+
+    results[phase] = {
+        "x": config_N[4:],
+        "dg": np.array(dg_vals),
+        "err": np.array(dg_errs)
+    }
+
+    ax = axes[i]
+    ax.errorbar(config_N[4:], dg_vals, yerr=dg_errs, fmt='o-', color=colors[phase],
+                capsize=3, label=f"ΔG ({phase})")
+    ax.set_ylabel("ΔG (eV/atom)")
+    ax.set_title(f"ΔG Convergence - {phase.capitalize()}")
+    ax.legend()
+
+# ΔT plot
+if 'solid' in results and 'liquid' in results:
+    dg_sol = results['solid']['dg']
+    err_sol = results['solid']['err']
+    dg_liq = results['liquid']['dg']
+    err_liq = results['liquid']['err']
+    x_vals = results['solid']['x']
+
+    deltaG_ls = dg_liq - dg_sol
+    errG_ls = np.sqrt(err_liq**2 + err_sol**2)
+    deltaT = deltaG_ls / S_ls
+    errT = np.sqrt((errG_ls / S_ls)**2 + (deltaT * S_ls_err / S_ls)**2)
+
+    axes[2].errorbar(x_vals, deltaT, yerr=errT, fmt='o-', color='tab:green',
+                     capsize=3, label="ΔT")
+    axes[2].set_ylabel("ΔT (K)")
+    axes[2].set_title("ΔT Convergence")
+    axes[2].legend()
+    axes[2].set_xlabel("Number of Configurations")
+
+plt.tight_layout()
+plt.savefig("$png", dpi=400)
+print(f"✓ Convergence plot saved to $png")
+EOF
+}
+
+

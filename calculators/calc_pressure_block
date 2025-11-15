@@ -1,0 +1,54 @@
+#!/bin/bash -l
+#===============================================================================
+# Script        : calc_pressure_block.sh
+# Description   : Extracts per-step pressure from VASP OUTCAR, computes average,
+#                 and runs reblocking analysis with Python
+#   calc_pressure_block OUTCAR_file [plot_file] [log_file] [raw_data_file]
+# Requires      : Python 3, matplotlib, numpy
+#===============================================================================
+
+
+calc_pressure_block() {
+    local outcar="${1:-OUTCAR}"
+    local plot_name="${2:-reblock_pressure_error.png}"
+    local log_file="${3:-pressure_block.log}"
+    local raw_data="${4:-pressure_values.dat}"
+
+    # Extract all instantaneous pressure values (in GPa) to a data file
+    grep 'plus kinetic' "$outcar" | awk '{
+        p = ($3 + $4 + $5) / 3; # average diagonal stress components
+        printf "%.5f\n", p / 10 # convert kBar to GPa
+    }' > "$raw_data" || { echo "Extraction failed" >&2; return 1; }
+    [[ ! -s "$raw_data" ]] && { echo "No pressure data in $outcar." >&2; return 1; }
+
+    avg=$(awk '{sum+=$1} END{printf("%.2f",sum/NR)}' "$raw_data")
+    echo "Average Pressure: ${avg} GPa" | tee -a "$log_file"
+
+    python3 - <<EOF
+import numpy as np
+import matplotlib.pyplot as plt
+
+pressures = np.loadtxt("$raw_data")
+N = len(pressures)
+naive_se = np.std(pressures, ddof=1) / N**0.5
+block_sizes, errors = [], []
+for b in range(2, max(3, N//10)):
+    n = N // b
+    if n < 2: break
+    blk = pressures[:n*b].reshape(n, b).mean(1)
+    errors.append(np.std(blk, ddof=1) / n**0.5)
+    block_sizes.append(b)
+if errors:
+    plt.plot(block_sizes, errors, label='Reblocked SE')
+    plt.axhline(naive_se, c='r', ls='--', label='Naive SE')
+    plt.xlabel('Block Size'); plt.ylabel('Std Error (GPa)')
+    plt.legend(); plt.tight_layout()
+    plt.savefig("$plot_name")
+    print(f"Naive SE: {naive_se:.2f} GPa")
+    print(f"Max Reblocked SE: {max(errors):.2f} GPa")
+    print(f"Plot saved as $plot_name")
+else:
+    print("Not enough data for reblocking")
+EOF
+}
+

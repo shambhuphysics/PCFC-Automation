@@ -1,0 +1,68 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : run_coexistence
+# Required files: POSCAR.coex (original structure for reset)
+# Purpose       : Executes a four-step protocol, tests solid-liquid coexistence, analyzes results, and saves outputs
+# Child Function: run_md, calc_pressure, density_profile, check_coexistence
+# Default parameters: temp=970, use_long=false, therm_steps=2000, nve_steps=2000, LIQUID_TEMP=4000, TOTAL_ATOMS=7064
+# Run individually: run_coexistence [temp] [use_long]
+# Example usage  : run_coexistence 1200 true
+# Last Update   : 2025-07-30 -Bigbug, Tmelt was fixed
+#===============================================================================
+
+run_coexistence() {
+    local temp="${1:-970}"
+    local use_long="${2:-false}"
+
+    # Use global variables as local defaults
+    local _therm_steps="${therm_steps:-20}"
+    local _nve_steps="${nve_steps:-20}"
+    local _LIQUID_TEMP="${TEMP_MELT:-14000}"
+    local _TOTAL_ATOMS="${TOTAL_ATOMS:-7064}"
+
+    echo "=== Evaluating $temp K ===" >&2
+
+    # Modify parameters for long evaluation mode
+    if [[ "$use_long" == "true" ]]; then
+        echo "Using long evaluation mode" >&2
+        _nve_steps=300000
+    fi
+
+    # Reset to original structure
+    [[ -f POSCAR.coex ]] && cp POSCAR.coex POSCAR || { echo "ERROR: No original POSCAR!" >&2; return 1; }
+
+    # 4-step protocol using local variables
+    local steps=(
+        "$_therm_steps $temp '' use_ander ''"
+        "$_therm_steps $_LIQUID_TEMP $(( _TOTAL_ATOMS / 2 )) use_ander ''"
+        "$_therm_steps $temp $(( _TOTAL_ATOMS / 2 )) use_ander ''"
+        "$_nve_steps $temp '' '' ''"
+    )
+
+    local labels=("Thermalization" "Partial  melting" "Re-thermalization" "NVE sampling")
+
+    for i in {0..3}; do
+        echo "Step $((i+1)): ${labels[i]}" >&2
+        eval "run_md ${steps[i]}" || { echo "ERROR: Step $((i+1)) failed" >&2; return 1; }
+        cp INCAR INCAR.$i
+    done
+
+    calc_pressure "OUTCAR" "pressure_${temp}K.log"
+    calc_atom CONTCAR "density_${temp}K.dat" 400 "density_${temp}K.png"  >&2
+    local state=$(classify_density "density_${temp}K.dat")
+
+    # Fallback: if not a recognized phase, set to Crashed
+    if [[ "$state" != "Coexistence" && "$state" != "Liquid-only" && "$state" != "Solid-only" ]]; then
+        state="Crashed"
+    fi
+
+    echo "Result: $state" >&2
+    echo "==================================" >&2
+
+    cp CONTCAR "CONTCAR_${temp}K"
+    cp XDATCAR "XDATCAR_${temp}K"
+    cp INCAR "INCAR_${temp}K"
+    [[ -f OUTCAR ]] && cp OUTCAR "OUTCAR_${temp}K"
+
+    echo "$state"
+}

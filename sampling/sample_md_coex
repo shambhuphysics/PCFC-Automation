@@ -1,0 +1,108 @@
+#!/bin/bash -l
+#===============================================================================
+# Function   : sample_md_coex
+# Purpose    : Run VASP MD sampling at coexistence conditions (solid/liquid)
+# Usage      : sample_md_coex [coex_temp] [coex_pres] [sim_time] [element] [melt_temp]
+# Example    : sample_md_coex (auto-reads from files), or sample_md_coex 970 0.5 30000 Mg 4000
+#===============================================================================
+
+sample_md_coex() {
+    # Read coexistence data if file exists
+    if [[ -f ../../coex_results.dat ]]; then
+        source ../../coex_results.dat
+        echo "✓ Reading coexistence data from ../../coex_results.dat"
+        echo "   COEX_TEMP=$COEX_TEMP K, COEX_PRESS=$COEX_PRESS GPa, COEX_VOL=$COEX_VOL Å³"
+    fi
+    
+    # Use provided parameters or defaults from file
+    local coex_temp="${1:-${COEX_TEMP:-970}}"
+    local coex_pres="${2:-${COEX_PRESS:-0.5}}"
+    local sim_time="${3:-30000}"
+    local element="${4:-Mg}"
+    local melt_temp="${5:-10000}"
+    
+    # Read volumes from file
+    if [[ -f vols-bulks.tmp ]]; then
+        read solid_vol liquid_vol < vols-bulks.tmp
+        echo "✓ Using EOS-derived volumes: Solid=${solid_vol} Å³, Liquid=${liquid_vol} Å³"
+    else
+        echo "⚠️ vols-bulks.tmp not found!"
+        exit 1
+    fi
+    
+    echo -e "\nSTEP 3: MD Sampling"
+    echo "=================="
+    echo "Parameters: T=${coex_temp}K, P=${coex_pres}GPa, Solid=${solid_vol}Å³, Liquid=${liquid_vol}Å³"
+    
+    local sampling_dir="Sampling_${coex_temp}K_${coex_pres}GPa"
+    mkdir -p "$sampling_dir"
+    cd "$sampling_dir" || exit 1
+    
+    # Copying structure files and setting volumes
+    cp ../../POSCAR.s POSCAR.s && sed -i "2s/.*/-$solid_vol/" POSCAR.s
+    cp ../../POSCAR.s POSCAR.l && sed -i "2s/.*/-$liquid_vol/" POSCAR.l
+
+    # Loop phases: s = solid, l = liquid
+    for phase in s l; do
+        local vol=$([[ $phase == s ]] && echo "$solid_vol" || echo "$liquid_vol")
+        echo "Running $phase phase MD at $vol Å³ for $sim_time steps..."
+
+        cp POSCAR.$phase POSCAR
+
+        # Use different MD options for solid/liquid
+        if [[ $phase == s ]]; then
+            run_md 5000 300 '' '' use_nosey >/dev/null 2>&1
+            run_md 5000 $coex_temp '' '' use_nosey >/dev/null 2>&1
+            run_md $sim_time $coex_temp '' '' use_nosey >/dev/null 2>&1
+        else
+            run_md 5000 $melt_temp '' '' use_nosey >/dev/null 2>&1  # Melt the structure
+            run_md 5000 $coex_temp '' '' use_nosey >/dev/null 2>&1  # Cool to coex temp
+            run_md $sim_time $coex_temp '' '' use_nosey >/dev/null 2>&1  # Production run
+        fi
+
+        # Save output files
+        for file in OUTCAR XDATCAR CONTCAR OSZICAR INCAR; do
+            [[ -f $file ]] && cp "$file" "${file}.$phase"
+        done
+
+        # Analysis tasks
+        calc_atom CONTCAR.$phase "density.$phase.dat" 40 "density.$phase.png" 2>/dev/null
+        
+        # Optional: trajectory conversion and MSD analysis
+        if [[ -f XDATCAR.$phase && -f CONTCAR.$phase ]]; then
+            convert_xdatcar true "XDATCAR.$phase" "CONTCAR.$phase" "XDATCAR_vasp.$phase" "$element" >/dev/null 2>&1
+            [[ -f XDATCAR_vasp.$phase ]] && calc_msd "XDATCAR_vasp.$phase" "$element" "${phase}_msd.png" >/dev/null 2>&1
+        fi
+    done
+
+    # Extract final pressure and temperature values after both phases complete
+    local p_solid=$(calc_pressure OUTCAR.s 2>&1 | grep "Pressure:" | awk '{print $2}')
+    local t_solid=$(calc_temperature OSZICAR.s 2>&1 | grep "Temperature:" | awk '{print $2}')
+    local p_liquid=$(calc_pressure OUTCAR.l 2>&1 | grep "Pressure:" | awk '{print $2}')
+    local t_liquid=$(calc_temperature OSZICAR.l 2>&1 | grep "Temperature:" | awk '{print $2}')
+
+    # Validation check: verify coexistence conditions
+    local p_diff_solid=$(echo "scale=2; sqrt(($p_solid - $coex_pres)^2)" | bc -l)
+    local p_diff_liquid=$(echo "scale=2; sqrt(($p_liquid - $coex_pres)^2)" | bc -l)
+    local t_diff_solid=$(echo "scale=2; sqrt(($t_solid - $coex_temp)^2)" | bc -l)
+    local t_diff_liquid=$(echo "scale=2; sqrt(($t_liquid - $coex_temp)^2)" | bc -l)
+
+    echo "Final conditions:"
+    echo "  Solid:  P=$p_solid GPa, T=$t_solid K"
+    echo "  Liquid: P=$p_liquid GPa, T=$t_liquid K"
+    echo "  Target: P=$coex_pres GPa, T=$coex_temp K"
+
+    # Check if conditions are within acceptable tolerance
+    if (( $(echo "$p_diff_solid < 0.5" | bc -l) )) && (( $(echo "$p_diff_liquid < 0.5" | bc -l) )) && \
+       (( $(echo "$t_diff_solid < 5" | bc -l) )) && (( $(echo "$t_diff_liquid < 5" | bc -l) )); then
+        echo "✓ Coexistence conditions achieved within tolerance"
+    else
+        echo "⚠ Warning: Coexistence conditions not achieved within tolerance"
+        echo "  Pressure deviations: Solid=±$p_diff_solid GPa, Liquid=±$p_diff_liquid GPa"
+        echo "  Temperature deviations: Solid=±$t_diff_solid K, Liquid=±$t_diff_liquid K"
+        return 1
+    fi
+
+    echo "✓ MD sampling complete in $sampling_dir/"
+    return 0
+}

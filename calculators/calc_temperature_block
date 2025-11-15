@@ -1,0 +1,49 @@
+#!/bin/bash -l
+#===============================================================================
+# Script        : calc_temperature_block.sh
+# Description   : Extracts per-step temperature from VASP OSZICAR, computes average,
+#                 and runs reblocking analysis with Python
+# Requires      : Python 3, matplotlib, numpy
+#   calc_temperature_block input_file [plot_file] [log_file] [raw_data_file]
+# Last Update   : 2025-08-05
+#===============================================================================
+
+
+calc_temperature_block() {
+    local oszicar="${1:-OSZICAR}"
+    local plot_name="${2:-reblock_temperature_error.png}"
+    local log_file="${3:-temperature_block.log}"
+    local raw_data="${4:-temperature_values.dat}"
+    
+    awk '{print $3}' "$oszicar" > "$raw_data" || { echo "Extraction failed" >&2; return 1; }
+    [[ ! -s "$raw_data" ]] && { echo "No temperature data for $oszicar." >&2; return 1; }
+
+    avg=$(awk '{s+=$1} END{printf("%.2f",s/NR)}' "$raw_data")
+    echo "Average Temperature: ${avg} K" | tee -a "$log_file"
+
+    python3 - <<EOF
+import numpy as np
+import matplotlib.pyplot as plt
+temps = np.loadtxt("$raw_data")
+N = len(temps)
+naive_se = np.std(temps, ddof=1) / N**0.5
+block_sizes, errors = [], []
+for b in range(2, max(3, N//10)):
+    n = N//b
+    if n < 2: break
+    blk = temps[:n*b].reshape(n, b).mean(1)
+    errors.append(np.std(blk, ddof=1) / n**0.5)
+    block_sizes.append(b)
+if errors:
+    plt.plot(block_sizes, errors, label='Reblocked SE')
+    plt.axhline(naive_se, c='r', ls='--', label='Naive SE')
+    plt.xlabel('Block Size'); plt.ylabel('Std Error (K)')
+    plt.legend(); plt.tight_layout()
+    plt.savefig("$plot_name")
+    print(f"Naive SE: {naive_se:.2f} K")
+    print(f"Max Reblocked SE: {max(errors):.2f} K")
+    print(f"Plot saved as $plot_name")
+else:
+    print("Not enough data for reblocking")
+EOF
+}

@@ -1,0 +1,61 @@
+
+
+#!/bin/bash -l
+#===============================================================================
+# Script        : calc_energy_block.sh
+# Description   : Extracts per-step temperature from VASP OSZICAR, computes average,
+#                 and runs reblocking analysis with Python
+# Requires      : Python 3, matplotlib, numpy
+#   #  calc_energy_block OSZICAR_file [plot_file] [log_file] [raw_data_file]
+# Last Update   : 2025-08-05
+#===============================================================================
+
+
+calc_energy_block() {
+    local filename="${1:-OSZICAR}"
+    local plot_name="${2:-reblock_energy_error.png}"
+    local log_file="${3:-Energy.log}"
+    local raw_data="${4:-energy_values.dat}"
+
+    # Wait up to 10 seconds for file to appear
+    local wait_count=0
+    while [[ ! -f "$filename" && $wait_count -lt 10 ]]; do
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    [[ ! -f "$filename" ]] && { echo "Error: File '$filename' not found." >&2; return 1; }
+
+    # Extract energy column (7th, standard OSZICAR) to raw_data
+    awk 'NF>=7 {print $7}' "$filename" > "$raw_data" || { echo "Extraction failed" >&2; return 1; }
+    [[ ! -s "$raw_data" ]] && { echo "No energy data in $filename." >&2; return 1; }
+
+    local avg=$(awk '{s+=$1} END{if(NR>0) printf("%.6f",s/NR); else print "N/A"}' "$raw_data")
+    echo "Average Energy: $avg" | tee -a "$log_file"
+
+    python3 - <<EOF
+import numpy as np
+import matplotlib.pyplot as plt
+
+energy = np.loadtxt("$raw_data")
+N = len(energy)
+naive_se = np.std(energy, ddof=1) / N**0.5
+block_sizes, errors = [], []
+for b in range(2, max(3, N//10)):
+    n = N // b
+    if n < 2: break
+    blk = energy[:n*b].reshape(n, b).mean(1)
+    errors.append(np.std(blk, ddof=1) / n**0.5)
+    block_sizes.append(b)
+if errors:
+    plt.plot(block_sizes, errors, label='Reblocked SE')
+    plt.axhline(naive_se, c='r', ls='--', label='Naive SE')
+    plt.xlabel('Block Size'); plt.ylabel('Std Error (eV)')
+    plt.legend(); plt.tight_layout()
+    plt.savefig("$plot_name")
+    print(f"Naive SE: {naive_se:.5f} eV")
+    print(f"Max Reblocked SE: {max(errors):.5f} eV")
+    print(f"Plot saved as $plot_name")
+else:
+    print("Not enough data for reblocking")
+EOF
+}

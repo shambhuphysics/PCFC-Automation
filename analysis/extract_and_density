@@ -1,0 +1,81 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : extract_and_density
+# Required files: XDATCAR_<temp>K, CONTCAR_<temp>K, calc_atom (in PATH)
+# Purpose       : Extracts frames from XDATCAR_<temp>K, computes Q6 or density
+# Output        : Frame-wise CONTCARs and density files in <temp>_<phase>/ dir
+# Usage         : extract_and_density 1125 Solid-only 300 8789 1 1
+# Example       : extract_and_density 1417 Coexistence 100 8001 1 1
+# Last Update   : 2025-08-04
+#===============================================================================
+
+extract_and_density() {
+    local temp="$1"              # e.g., 1125
+    local phase="$2"             # e.g., Solid-only, Liquid-only, Coexistence
+    local frames="${3:-24}"      # how many frames to extract
+    local atoms="${4:-8112}"     # number of atoms # space no need , fixed below
+    local frame_spacing="${5:-1}"
+    local start_frame="${6:-1}"
+
+    if [[ -z "$temp" || -z "$phase" ]]; then
+        echo "Usage: extract_and_density <temperature> <phase> [frames] [atoms] [spacing] [start_frame]"
+        return 1
+    fi
+
+    local tempK="${temp}K"
+    local xdatcar_src="XDATCAR_${tempK}"
+    local poscar_src="CONTCAR_${tempK}"
+
+    if [[ ! -f "$xdatcar_src" || ! -f "$poscar_src" ]]; then
+        echo "❌ Required files XDATCAR_${tempK} or CONTCAR_${tempK} not found."
+        return 1
+    fi
+
+    local workdir="${temp}_${phase}"
+    mkdir -p "$workdir"
+    cp "$xdatcar_src" "$workdir/XDATCAR"
+    cp "$poscar_src" "$workdir/POSCAR"
+
+    cd "$workdir" || { echo "❌ Failed to enter $workdir"; return 1; }
+
+    echo "✓ Working in $workdir"
+
+    local poscar_file="POSCAR"
+    local xdatcar_file="XDATCAR"
+    local poscar_header_lines=7
+    local xdatcar_header_lines=6
+
+    for ((i=start_frame; i<=frames; i+=frame_spacing)); do
+        local out_concar="CONTCAR.$i"
+        if [[ -f "$out_concar" ]]; then
+            echo "• Skipping $out_concar (already exists)"
+            continue
+        fi
+
+        head -n $poscar_header_lines "$poscar_file" > POSCAR.head
+        cp POSCAR.head POSCAR
+        awk -v i=$i -v atoms=$atoms -v head=$xdatcar_header_lines \
+            'NR > (head + (i-1)*(atoms+1)) && NR <= (head + (i-1)*(atoms+1) + (atoms+1)) {print $1, $2, $3}' "$xdatcar_file" >> POSCAR
+
+        cp POSCAR "$out_concar"
+
+        # Calculate density or Q6 using calc_atom
+        local outfile="density_${tempK}.${i}.dat_${phase}_$$.dat"
+        local plotfile="density_${tempK}.${i}.png"
+
+        calc_atom "$out_concar" "$outfile" 400 "$plotfile"
+
+        echo "✓ Extracted frame $i → $out_concar → $outfile"
+    done
+
+    echo "✓ All frames processed under $workdir"
+
+    # Central training data copy
+    local central_path="labeled_density_profiles"
+    mkdir -p "$central_path"
+    cp density_*.*.dat "$central_path"
+
+    echo "✓ Copied labeled density files to $central_path"
+
+    cd ..
+}
