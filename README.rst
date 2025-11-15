@@ -136,6 +136,23 @@ If you use PCFC in your research, please cite:
      url = {https://github.com/shamphuphysics/pcfc}
    }
 
+   @article{10.1063/5.0264856,
+    author = {Sharma, Shambhu Bhandari and Mehta, Shailesh and Alfè, Dario},
+    title = {Ab initio phase diagrams of binary alloys in the low solute concentration limit},
+    journal = {The Journal of Chemical Physics},
+    volume = {162},
+    number = {18},
+    pages = {184502},
+    year = {2025},
+    month = {05},
+    issn = {0021-9606},
+    doi = {10.1063/5.0264856},
+    url = {https://doi.org/10.1063/5.0264856},
+    eprint = {https://pubs.aip.org/aip/jcp/article-pdf/doi/10.1063/5.0264856/20515367/184502_1_5.0264856.pdf},
+}
+
+
+
 Contributing
 ============
 Contributions welcome! Please follow:
