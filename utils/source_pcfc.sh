@@ -61,6 +61,7 @@ source $PCFC_BASE/utils/convert_xdatcar
 source $PCFC_BASE/utils/pipeline_ref
 source $PCFC_BASE/utils/show_pipeline_help
 source $PCFC_BASE/utils/write_incar
+source $PCFC_BASE/utils/display_banner
 # source $PCFC_BASE/utils/phase_rename  # Uncomment if needed
 
 # ============================================================================

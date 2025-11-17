@@ -20,7 +20,7 @@ run_coexistence() {
     local _LIQUID_TEMP="${TEMP_MELT:-14000}"
     local _TOTAL_ATOMS="${TOTAL_ATOMS:-7064}"
 
-    echo "=== Evaluating $temp K ===" >&2
+    echo "=== Evaluating $temp K ===" >&2   # all non-state outs are redirected to stderr
 
     # Modify parameters for long evaluation mode
     if [[ "$use_long" == "true" ]]; then
@@ -39,7 +39,7 @@ run_coexistence() {
         "$_nve_steps $temp '' '' ''"
     )
 
-    local labels=("Thermalization" "Partial  melting" "Re-thermalization" "NVE sampling")
+    local labels=("Thermalization" "Melting-half" "Re-thermalization" "NVE-evolution")
 
     for i in {0..3}; do
         echo "Step $((i+1)): ${labels[i]}" >&2
@@ -64,5 +64,5 @@ run_coexistence() {
     cp INCAR "INCAR_${temp}K"
     [[ -f OUTCAR ]] && cp OUTCAR "OUTCAR_${temp}K"
 
-    echo "$state"
+    echo "$state"  # The only thing that appears in ouput screen 
 }

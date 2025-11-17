@@ -8,7 +8,7 @@ from scipy.stats import skew, kurtosis, entropy
 #model_path = "/home/ucfbsbh/usr/hcp_fe_train_density/density_classifier_fe_hcp.pkl"
 
 
-model_path = "/home/ucfbsbh/usr/pcfc/ml/density_classifier.pkl"
+model_path = "/home/ucfbsbh/usr/pcfc/ml/models/density_classifier.pkl"
 
 def compute_features(filepath):
     try:

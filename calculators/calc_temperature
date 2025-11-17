@@ -29,7 +29,7 @@ calc_temperature() {
 
     # Calculate the average of the third column using awk
     local avg
-    avg=$(awk '{sum+=$3} END {if(NR>0) printf "%.2f", sum/NR; else print "N/A"}' "$filename")
+    avg=$(awk '{sum+=$3} END {if(NR>0) printf "%.0f", sum/NR; else print "N/A"}' "$filename")
 
     # Log and display result
     if [[ "$avg" != "N/A" ]]; then

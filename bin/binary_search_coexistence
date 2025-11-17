@@ -16,7 +16,7 @@ binary_search_coexistence() {
     local temp_tolerance="${TEMP_TOLERANCE:-10}"
     local max_iterations="${MAX_ITERATIONS:-15}"
 
-    echo "🔍 Binary search: $low-$high K (tolerance: $temp_tolerance K)"
+    echo "🔍 Binary search range: $low - $high K (tolerance: $temp_tolerance K)"
     echo "================================================="
 
     local iteration=1
@@ -39,7 +39,7 @@ binary_search_coexistence() {
 
                 echo "🔬 Performing refinement..."
                 local refined_state
-                refined_state=$(run_coexistence "$mid" "true")
+                refined_state=$(run_coexistence "$mid" "true")  # Rerun longer to verify Coexistence.
 
                 echo "📈 Refined result: $refined_state"
 
@@ -49,11 +49,11 @@ binary_search_coexistence() {
                         return 0
                         ;;
                     "Solid-only")
-                        echo "🧊 REFINED → SOLID"
+                        echo "🧊 REFINED → SOLID -> need HIGHER ⬆️ temperature"
                         low=$mid
                         ;;
                     "Liquid-only")
-                        echo "💧 REFINED → LIQUID"
+                        echo "💧 REFINED → LIQUID LIQUID -> need LOWER ⬇️ temperature"
                         high=$mid
                         ;;
                     "Crashed")
@@ -79,14 +79,10 @@ binary_search_coexistence() {
         echo "📏 New range: $low-$high K"
 
         # Check convergence
-        [[ $range -le $temp_tolerance ]] && {
-            echo "🎯 Converged within tolerance"
-            local final_temp=$(( (low + high) / 2 ))
-            local final_state
-            final_state=$(run_coexistence "$final_temp" "true")
-            COEXISTENCE_TEMP=$final_temp
-            [[ "$final_state" == "Coexistence" ]] && { SEARCH_SUCCESS=1; return 0; } || { SEARCH_SUCCESS=0; return 1; }
-        }
+        if [[ $range -le $temp_tolerance ]]; then
+        echo "⚠️ Range narrowed to ${range}K - coexistence not found 🔍"
+        return 1
+        fi
 
         iteration=$((iteration + 1))
         echo "-------------------------------------------------"

@@ -41,7 +41,7 @@ calc_pressure() {
     
     # Display and log results if pressure calculation successful
     if [[ -n "$pressure" && "$pressure" != "N/A" ]]; then
-        echo "Pressure: ${pressure} GPa" | tee -a "$log_file" >&2
+        echo "Pressure: ${pressure} GPa" | tee -a "$log_file" 
     fi
 }
 
