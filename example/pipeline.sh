@@ -19,7 +19,7 @@ TEMP_MAX=$((TARGET_TCOEX + TEMP_RANGE))  # 1100K
 TEMP_TOLERANCE=10
 
 # Choose Volume of Supercell
-VOLUME_COEX=196274   # for serial , set your vlume 
+VOLUME_COEX=176274   # for serial , set your vlume 
 
 #===============================================================================
 # Free Energy Correction Variables
@@ -42,23 +42,6 @@ check_step_complete() {
     [[ -f "$2" ]] && { echo "✓ $1 already complete - skipping"; return 0; }
     return 1
 }
-
-export_coexistence_data() {
-    local TEMP=$(calc_temperature OSZICAR | awk '{print $2}')
-    local PRESS=$(calc_pressure OUTCAR 2>&1 | grep -o '[0-9]*\.[0-9]*')
-    local VOL=$(calc_volume OUTCAR)
-    local vol_per_atom=$(echo "scale=6; $VOL / $COEX_ATOMS" | bc -l)
-    
-    cat > ../coex_results.dat << EOF
-COEX_TEMP=$TEMP
-COEX_PRESS=$PRESS
-COEX_VOL=$vol_per_atom
-EOF
-    
-    echo "✅ Coexistence: V=${VOL}Å³(${vol_per_atom}Å³/atom), P=${PRESS}GPa, T=${TEMP}K"
-}
-
-
 #===============================================================================
 # PIPELINE EXECUTION
 #===============================================================================
@@ -76,7 +59,6 @@ if ! check_step_complete "Coexistence search" "coex_results.dat"; then
     TOTAL_ATOMS=$COEX_ATOMS therm_steps=$THERM_STEPS nve_steps=$NVE_STEPS
     
     main_exe || { echo "❌ Coexistence failed"; exit 1; }
-    export_coexistence_data
     cd ..
 fi
 
