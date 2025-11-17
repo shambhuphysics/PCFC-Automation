@@ -66,7 +66,7 @@ source $PCFC_BASE/utils/write_incar
 # ============================================================================
 # ML - Machine learning density classifier
 # ============================================================================
-#source $PCFC_BASE/ml/classify_density.py
+source $PCFC_BASE/ml/classify_density
 
 # ============================================================================
 # Export PCFC base directory for use in scripts
