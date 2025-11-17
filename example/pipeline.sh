@@ -62,7 +62,7 @@ EOF
 #===============================================================================
 # PIPELINE EXECUTION
 #===============================================================================
-LOG_FILE="pipeline_$(date +%Y%m%d_%H%M%S).log"
+LOG_FILE="History_$(date +%Y%m%d_%H%M%S).log"
 exec > "$LOG_FILE" 2>&1
 echo "Pipeline started: $(date) | Element: $ELEMENT"
 
