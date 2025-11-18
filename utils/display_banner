@@ -1,0 +1,25 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : display_banner
+# Purpose       : Display script header with user information
+# Last Update   : 2025-11-17
+#===============================================================================
+
+display_banner() {
+    local USER_NAME="Shambhu Bhandari Sharma"
+    local USER_EMAIL="shambhu.sharma.22@ucl.ac.uk"
+    local USER_AFFILIATION="University College London"
+    local SCRIPT_DATE="$(date +"%Y-%m-%d")"
+
+    echo -e "\033[1;36m============================================================\033[0m"
+    echo -e "\033[1;36m       SOLID-LIQUID COEXISTENCE SEARCH\033[0m"
+    echo -e "\033[1;36m============================================================\033[0m"
+    echo "Element: $ELEMENT | Atoms: $TOTAL_ATOMS | Range: ${TEMP_MIN:-970}-${TEMP_MAX:-1000} K"
+    echo ""
+    echo "Script by: $USER_NAME"
+    echo "Email: $USER_EMAIL"
+    echo "Affiliation: $USER_AFFILIATION"
+    echo "Date: $SCRIPT_DATE"
+    echo -e "\033[1;36m============================================================\033[0m"
+    echo ""
+}
