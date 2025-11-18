@@ -1,0 +1,27 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : classify_density
+# Purpose       : Classify density profile using a trained ML model (Python)
+# Required      : classify_density.py must be in PATH or $HOME/usr/pcfc
+# Usage         : state=$(classify_density density_3500K.12.dat_Solid-only.dat)
+#===============================================================================
+
+
+classify_density() {
+  local density_file="${1:-density.dat}"
+  local script_path="$HOME/usr/pcfc/ml/classify_density.py"  # Adjust path if needed
+
+  if [[ ! -f "$density_file" ]]; then
+    echo "Crashed"
+    return
+  fi
+
+  local result
+  result=$(python3 "$script_path" "$density_file" 2>/dev/null)
+
+  if [[ "$result" == "Solid-only" || "$result" == "Liquid-only" || "$result" == "Coexistence" ]]; then
+    echo "$result"
+  else
+    echo "Crashed"
+  fi
+}
