@@ -1,0 +1,79 @@
+#!/bin/bash -l
+#===============================================================================
+# Function      : calc_tpe_classical
+# Purpose       : Plot Temperature, Pressure, Energy, Volume from VASP-MD-like outputs
+# Usage         : calc_tpe_classical [OUTCAR] [OSZICAR] [output_plot]
+# Example       : calc_tpe_classical OUTCAR OSZICAR tpe_plot.png
+#===============================================================================
+
+calc_tpe() {
+    local outcar="${1:-OUTCAR}"
+    local oszicar="${2:-OSZICAR}"
+    local outimg="${3:-tpe_plot.png}"
+
+    for f in "$oszicar" "$outcar"; do
+        local w=0
+        while [[ ! -f "$f" && $w -lt 10 ]]; do sleep 1; ((w++)); done
+        [[ ! -f "$f" ]] && { echo "Error: $f not found." >&2; return 1; }
+    done
+
+python3 << EOF
+import numpy as np
+import matplotlib.pyplot as plt
+import re
+
+# --- Extract T and E from OSZICAR ---
+with open("$oszicar") as f: osz = f.readlines()
+T = [float(line.split()[2]) for line in osz if 'T=' in line]
+E = [float(line.split()[6]) for line in osz if len(line.split())>6]
+
+# --- Pressure extraction using "plus kinetic" logic ---
+with open("$outcar") as f: outc = f.readlines()
+P_diag = []
+for line in outc:
+    if 'plus kinetic' in line:
+        toks = line.split()
+        if len(toks) >= 6:  # tokens: ... plus ... xx yy zz ...
+            try:
+                xx,yy,zz = map(float,[toks[2],toks[3],toks[4]])
+                avg_kbar = (xx+yy+zz)/3
+                P_diag.append(avg_kbar/10.0)  # Convert kBar to GPa
+            except: continue
+P_arr = np.array(P_diag)
+P_avg = np.mean(P_arr) if P_arr.size else np.nan
+
+# --- Volume extraction ---
+vols = []
+for line in outc:
+    if "volume of cell" in line:
+        toks = line.strip().split()
+        try:
+            vols.append(float(toks[-1]))
+        except: continue
+V = vols[-1] if vols else np.nan
+
+T_arr = np.array(T)
+E_arr = np.array(E)
+T_avg = np.mean(T_arr) if T_arr.size else np.nan
+E_avg = np.mean(E_arr) if E_arr.size else np.nan
+
+# --- Summary, save ---
+summary = f"⟨T⟩ = {T_avg:.1f} K | ⟨P⟩ = {P_avg:.2f} GPa | ⟨E⟩ = {E_avg:.3f} eV | V = {V:.2f} Å³"
+with open("tpe_summary.txt","w") as o: o.write(summary+"\n")
+
+fig, ax = plt.subplots(3, 1, figsize=(7,7), sharex=True)
+ax[0].plot(T_arr, label='Temperature', color='royalblue'); ax[0].legend(); ax[0].set_ylabel('T(K)')
+ax[1].plot(P_arr, label='Pressure (GPa)', color='crimson'); ax[1].legend(); ax[1].set_ylabel('P(GPa)')
+ax[2].plot(E_arr, label='Energy', color='seagreen'); ax[2].legend(); ax[2].set_ylabel('E(eV)')
+for i, avg in enumerate([T_avg,P_avg,E_avg]): ax[i].axhline(avg, ls='--', lw=1, color='gray', alpha=0.6)
+plt.xlabel("MD step")
+plt.suptitle("T, P, E Evolution at a Constant Volume", y=0.98, fontsize=15)
+plt.figtext(0.13,0.01, summary, fontsize=10, ha='left', va='bottom', bbox=dict(color='gray',alpha=0.14,boxstyle='round'))
+plt.tight_layout(rect=[0,0.035,1,0.96])
+plt.savefig("$outimg",dpi=300,bbox_inches='tight')
+plt.close()
+print(summary + f"\n✓ Plot: $outimg")
+EOF
+
+    [[ -f "$outimg" ]] || { echo "✗ Plot generation failed!"; return 1; }
+}

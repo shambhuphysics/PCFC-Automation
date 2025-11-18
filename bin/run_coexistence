@@ -48,6 +48,8 @@ run_coexistence() {
     done
 
     calc_pressure "OUTCAR" "pressure_${temp}K.log" >&2
+    calc_tpe "OUTCAR" "OSZICAR" "TPE_${temp}K." >&2
+
     calc_atom CONTCAR "density_${temp}K.dat" 400 "density_${temp}K.png"  >&2
     local state=$(classify_density "density_${temp}K.dat")
 

@@ -20,14 +20,13 @@ source $PCFC_BASE/calculators/calc_atom
 source $PCFC_BASE/calculators/calc_correction
 source $PCFC_BASE/calculators/calc_energy
 source $PCFC_BASE/calculators/calc_energy_block
-source $PCFC_BASE/calculators/calc_enthalpy
-source $PCFC_BASE/calculators/calc_entropy
 source $PCFC_BASE/calculators/calc_msd
 source $PCFC_BASE/calculators/calc_pressure
 source $PCFC_BASE/calculators/calc_pressure_block
 source $PCFC_BASE/calculators/calc_temperature
 source $PCFC_BASE/calculators/calc_temperature_block
 source $PCFC_BASE/calculators/calc_volume
+source $PCFC_BASE/calculators/calc_tpe
 # source $PCFC_BASE/calculators/calc_avg_freq  # Uncomment if needed
 
 # ============================================================================
